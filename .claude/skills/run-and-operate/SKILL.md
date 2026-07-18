@@ -37,22 +37,14 @@ Requires Node >= 20.9 (`engines` in `package.json`; CI runs Node 24). Check with
 `APP_BASE_URL=http://localhost:3000`. Next.js loads it automatically. Without it,
 pages that touch Auth0/Bunny/Redis will error.
 
-**Build without any real services** (same dummy values CI uses — they only need
-to exist so `next build` can compile; nothing is contacted):
+**Build without any real services** — run `npm run build` with the CI
+dummy-env values (they only need to exist so `next build` can compile;
+nothing is contacted). The canonical copy-pasteable block lives in
+config-and-env → "CI dummy env (build without real services)":
 
 ```bash
-AUTH0_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
-APP_BASE_URL=http://localhost:3000 \
-AUTH0_DOMAIN=example.us.auth0.com \
-AUTH0_CLIENT_ID=ci-dummy \
-AUTH0_CLIENT_SECRET=ci-dummy \
-BUNNY_LIBRARY_ID=1 \
-BUNNY_API_KEY=ci-dummy \
-BUNNY_TOKEN_AUTH_KEY=ci-dummy \
-ADMIN_EMAILS=admin@example.com \
-KV_REST_API_URL=https://example.upstash.io \
-KV_REST_API_TOKEN=ci-dummy \
-npm run build
+# env block: see config-and-env → "CI dummy env (build without real services)"
+<dummy env from config-and-env> npm run build
 ```
 
 Pre-push checklist: `npm run lint && npm test`, then the build one-liner above.

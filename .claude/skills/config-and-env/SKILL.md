@@ -6,8 +6,10 @@ description: >-
   defaults, traps), the Redis-stored runtime settings editable live from /admin,
   how to recreate .env.local and the CI dummy env from scratch, and the
   add-a-new-config-axis checklist. Use when adding/changing/debugging an env var
-  or admin setting, or when a feature seems "off" or misconfigured. Not for
-  provisioning accounts (see run-and-operate) or data-model design rationale
+  or admin setting, or when a feature seems "off" or misconfigured. Also home
+  of the canonical CI dummy-env block and the secret-rotation runbook. Not for
+  a configured feature actively misbehaving (see debugging-playbook),
+  provisioning accounts (see run-and-operate), or data-model design rationale
   (see architecture-contract).
 ---
 
@@ -59,7 +61,7 @@ from repo root — re-run it before trusting this table).
 | `BUNNY_CDN_HOSTNAME` | `lib/bunny.js:88` | Server | `thumbnailUrl()` returns `null` → homepage renders a title list instead of a thumbnail grid | Trimmed. It's the library's CDN/pull-zone host, e.g. `vz-xxxx-xxx.b-cdn.net` |
 | `BUNNY_CDN_TOKEN_KEY` | `lib/bunny.js:91` | Server | Falls back to `BUNNY_TOKEN_AUTH_KEY`; if neither, thumbnails are served **unsigned** (`bunny.js:92`) | Only needed when the pull zone's URL Token key differs from the embed key |
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | `components/NotifyButton.js:4` (client, **build-baked**), `lib/push.js:6,39`, `pages/admin.js:32` (server) | Both | Push UI hidden, push silently disabled | Baked into the bundle — changing it requires a rebuild. See half-configured trap below |
-| `VAPID_PRIVATE_KEY` | `lib/push.js:6,40` | Server | Push disabled | Secret half of the keypair from `npx web-push generate-vapid-keys` |
+| `VAPID_PRIVATE_KEY` | `lib/push.js:6,40` | Server | Push disabled | Secret half of the keypair from `npx web-push generate-vapid-keys` (VAPID = the Web Push server-identification standard; protocol in the reference skill) |
 | `VAPID_SUBJECT` | `lib/push.js:36` | Server | Defaults to `mailto:<first ADMIN_EMAILS entry>` (or `mailto:admin@example.com` if that's empty too) | Must be a `mailto:` or `https:` URI |
 | `RESEND_API_KEY` | `lib/mail.js:5,17`; `pages/admin.js:31` (gates the email UI) | Server | Share-link email UI hidden; `sendShareEmail` returns `{ok:false, skipped:true}` — link creation still works | Mail is best-effort: a send failure never blocks link creation (`pages/api/admin/share.js:79`) |
 | `MAIL_FROM` | `lib/mail.js:11` | Server | Defaults to `onboarding@resend.dev` (Resend's test sender) | Production value must be a Resend-verified sender, e.g. `Marine Video Portal <share@yourdomain.com>` |
@@ -164,11 +166,17 @@ openssl rand -hex 32                 # AUTH0_SECRET
 npx web-push generate-vapid-keys     # NEXT_PUBLIC_VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY
 ```
 
-### CI dummy env (build without real services)
+### CI dummy env (build without real services) — CANONICAL COPY
 
-Copied verbatim from `.github/workflows/ci.yml` (the build step's `env:`
-block). Use the same pattern for a local `npm run build` without real
-credentials:
+This is the **single home** for the dummy-env block. change-control,
+debugging-playbook, run-and-operate, and campaign-email-verified all
+cross-reference this section instead of carrying their own copies — when a
+build-required variable is added, update `.github/workflows/ci.yml` AND this
+section, and every sibling stays correct automatically.
+
+Source of truth: `.github/workflows/ci.yml` (the build step's `env:` block),
+mirrored here verbatim. The values only need to exist so `next build` can
+compile; nothing is contacted:
 
 ```yaml
 AUTH0_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
@@ -183,6 +191,45 @@ ADMIN_EMAILS: admin@example.com
 KV_REST_API_URL: https://example.upstash.io
 KV_REST_API_TOKEN: ci-dummy
 ```
+
+Copy-pasteable bash form (same values, run from repo root):
+
+```bash
+AUTH0_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
+APP_BASE_URL=http://localhost:3000 \
+AUTH0_DOMAIN=example.us.auth0.com \
+AUTH0_CLIENT_ID=ci-dummy \
+AUTH0_CLIENT_SECRET=ci-dummy \
+BUNNY_LIBRARY_ID=1 \
+BUNNY_API_KEY=ci-dummy \
+BUNNY_TOKEN_AUTH_KEY=ci-dummy \
+ADMIN_EMAILS=admin@example.com \
+KV_REST_API_URL=https://example.upstash.io \
+KV_REST_API_TOKEN=ci-dummy \
+npm run build
+```
+
+### Rotating a leaked or expiring secret
+
+No skill owned this until 2026-07-18; it lives here because rotation is a
+config operation. The generic sequence, for any secret in the catalog:
+
+1. Generate the replacement at the owning service (Bunny dashboard / Auth0
+   application settings / Upstash / `openssl rand -hex 32` for
+   `AUTH0_SECRET` / `npx web-push generate-vapid-keys` for VAPID).
+2. Update the value in Vercel → Settings → Environment Variables, then
+   **redeploy** (env changes never apply to running deployments). If the
+   secret is `NEXT_PUBLIC_*` (VAPID public key), a rebuild is required and
+   every subscribed browser must re-subscribe — see the catalog row.
+3. Revoke/delete the old credential at the owning service **after** the new
+   deployment is confirmed working (`env-doctor` + a login + a playback).
+4. Consequences to expect: rotating `AUTH0_SECRET` invalidates all session
+   cookies (everyone re-logs-in — harmless); rotating `BUNNY_TOKEN_AUTH_KEY`
+   must be paired with updating the same key in the Bunny library's Security
+   tab or every embed/thumbnail 403s; rotating VAPID keys orphans existing
+   push subscriptions (they are pruned automatically on next send).
+5. Audit: nothing in-app logs rotations — note it in the PR/issue that
+   triggered it.
 
 ## "Add a new configuration axis" checklist
 
@@ -206,7 +253,10 @@ KV_REST_API_TOKEN: ci-dummy
    `.claude/skills/docs-and-writing/SKILL.md`.
 6. **CI:** if the build reads it (any `NEXT_PUBLIC_*`, anything in
    `next.config.js`), add a dummy value to the `.github/workflows/ci.yml`
-   build env block.
+   build env block **and to the canonical dummy-env block in this skill's
+   "CI dummy env" section** — change-control, debugging-playbook,
+   run-and-operate, and campaign-email-verified all cross-reference it
+   instead of carrying copies.
 7. **This skill:** add the var/setting to the catalog above and a re-verify
    line to Provenance below.
 

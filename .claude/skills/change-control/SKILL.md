@@ -46,11 +46,13 @@ Vercel deploys `main`. Two precision points:
 | Config / env | Vercel env vars, Redis-stored settings | No code gate — but no silent behavior change either: `NEXT_PUBLIC_*` values are baked at build time (redeploy required), and README's env table must stay true. See `.claude/skills/config-and-env/SKILL.md` |
 | Docs of record | `README.md`, `FEATURES.md` | CI still runs (cheap); accuracy gate is `.claude/skills/docs-and-writing/SKILL.md` — never document a behavior that code does not have |
 | Skill library | `.claude/skills/**` | CI runs but does not check skill content; verify every stated command/path against the repo before writing it, keep the sibling map's one-home-per-fact rule |
+| Production data / Redis migration | Any write to the live Upstash database outside the app's own code paths (key renames, bulk edits, the `pvp:*`→`fable2:*` orphan migration) | **Reviewed change, never ad-hoc**: capture before-state with diagnostics-and-tooling's redis-inspect, write the exact command list into a PR/issue for approval, run it, capture after-state with the same script. Redis holds live access-control state (viewers, shares) — an unreviewed mutation is invisible to CI and irreversible without a backup |
+| Dependency security patch (CVE bump of an existing dep) | Version-only change in `package.json` for a published vulnerability | Green CI + note the advisory in the commit message. Unlike adding a dependency (non-negotiable 8) there is no justification burden, but the compatibility question remains — the ESLint pin (non-negotiable 5) is the precedent for a "routine" tooling bump breaking the build, so never batch a CVE bump with feature work |
 
 ## Non-negotiables
 
 Each rule states WHAT, then RATIONALE, then the evidence or incident behind it.
-These are inferred from code patterns and the complete 4-commit history — they
+These are inferred from code patterns and the 4 application-code commits — they
 are load-bearing, not stylistic.
 
 **1. Identity logic changes only in `lib/auth.js`.**
@@ -204,22 +206,14 @@ npm run lint
 npm test
 ```
 
-Build with CI's exact dummy env (copied from `.github/workflows/ci.yml`; CI
-runs Node 24, local requires >= 20.9):
+Build with CI's exact dummy env (CI runs Node 24, local requires >= 20.9).
+The canonical copy-pasteable block lives in ONE place — config-and-env's
+"CI dummy env" section (synced from `.github/workflows/ci.yml`); copy it from
+there:
 
 ```bash
-AUTH0_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
-APP_BASE_URL=http://localhost:3000 \
-AUTH0_DOMAIN=example.us.auth0.com \
-AUTH0_CLIENT_ID=ci-dummy \
-AUTH0_CLIENT_SECRET=ci-dummy \
-BUNNY_LIBRARY_ID=1 \
-BUNNY_API_KEY=ci-dummy \
-BUNNY_TOKEN_AUTH_KEY=ci-dummy \
-ADMIN_EMAILS=admin@example.com \
-KV_REST_API_URL=https://example.upstash.io \
-KV_REST_API_TOKEN=ci-dummy \
-npm run build
+# env block: see config-and-env → "CI dummy env (build without real services)"
+<dummy env from config-and-env> npm run build
 ```
 
 Then confirm:

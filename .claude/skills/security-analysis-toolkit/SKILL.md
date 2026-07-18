@@ -1,6 +1,6 @@
 ---
 name: security-analysis-toolkit
-description: First-principles proof methods for the Marine Video Portal's security claims — prove it, don't eyeball it. Use when a change touches auth, guards, signing, sessions, share links, or adds any page/API route; when reviewing a security-touching PR (change-control requires the matrix re-check); or when asked "is this safe?". Contains the entry-point×guard matrix method (with the verified matrix), token-signature verification recipes, information-leak analysis, secret trust-boundary tracing, and the fail-open/fail-closed audit. Not for executing the email_verified campaign (see campaign-email-verified) or writing tests (see validation-and-qa).
+description: First-principles proof methods for the Marine Video Portal's security claims — prove it, don't eyeball it. Use when a change touches auth, guards, signing, sessions, share links, or adds any page/API route; when reviewing a security-touching PR (change-control requires the matrix re-check); or when asked "is this safe?". Contains the entry-point×guard matrix method (with the verified matrix), token-signature verification recipes, information-leak analysis, secret trust-boundary tracing, and the fail-open/fail-closed audit. PAIRS WITH architecture-contract — that skill states the invariants a change must keep; this one proves they hold. Load BOTH when adding or changing a route. Not for executing the email_verified campaign (see campaign-email-verified) or writing tests (see validation-and-qa).
 ---
 
 # Security analysis toolkit

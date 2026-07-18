@@ -79,7 +79,8 @@ documented failure archaeology.
 
 - **Falls short (verified):** 30 unit tests cover 4 pure-logic modules
   (`lib/__tests__/`); zero coverage of API handlers, guards-as-wired, or
-  GSSPs. The strongest invariants (deny-by-default) are proven only by the
+  GSSPs (GSSP = `getServerSideProps`, Next.js server-side page code; glossary
+  in the reference skill). The strongest invariants (deny-by-default) are proven only by the
   runtime smoke-probe, not in CI.
 - **Asset:** handlers are small and take plain `(req, res)`; the
   security-analysis-toolkit entry-point matrix is a ready-made coverage

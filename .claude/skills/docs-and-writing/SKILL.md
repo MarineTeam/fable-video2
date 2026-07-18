@@ -188,7 +188,7 @@ Rules for writing or editing any skill in this repo:
 - **Frontmatter contract** — YAML with `name:` (matching the directory name)
   and a trigger-rich `description:` that says exactly WHEN to load the skill
   (symptoms, verbs, situations), ideally ending "Not for ... (see <sibling>)."
-  Keep it under ~500 characters.
+  Keep it under ~600 characters.
 - **Provenance and maintenance section required** — every skill ends with one:
   how it was derived, and one-line re-verification commands for every volatile
   fact it states. A skill without one cannot be trusted after its first drift.
@@ -231,7 +231,8 @@ every cited line number, code comment, and style example against the working
 tree, and cross-checking the drift entries against `lib/redis.js`,
 `lib/theme.js`, `public/sw.js`, `package.json`, `eslint.config.mjs`, and
 `.github/workflows/ci.yml`. Commit references (`6dd4351` namespace rename,
-`9e5b086` ESLint pin) come from the repo's 4-commit history.
+`9e5b086` ESLint pin) come from the repo's 4 application-code commits
+(the skill library adds later commits touching only `.claude/skills/`).
 
 Re-verify before relying on volatile facts:
 

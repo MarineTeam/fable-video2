@@ -94,7 +94,9 @@ Each entry: likely cause → discriminating experiment → fix. Extends the READ
 
 ### 2.9 HTTP 429 "Too many requests"
 
-Exactly **three** endpoints are rate-limited (per normalized email, sliding window):
+Exactly **three** endpoints are rate-limited (per normalized email, sliding
+window; canonical inventory lives in architecture-contract — re-derive with
+`grep -rn "allowRequest(" pages/api`):
 
 | Endpoint | Limit | Code |
 |---|---|---|
@@ -136,28 +138,21 @@ Viewers all "Not approved", shares 404, continue-watching gone, palette reset, a
 
 - **Root cause (the one time it happened):** commit `6dd4351` changed the key prefix from `pvp:` to `fable2:` in `lib/redis.js` **only** (`export const k = (name) => \`fable2:${name}\`;`, line 19). Every key the app reads moved; all data written by pre-rename deployments — `pvp:viewers`, `pvp:share:*`, `pvp:progress:*`, `pvp:theme`, `pvp:audit`, `pvp:order`, `pvp:settings:homeCount`, `pvp:push:subs` — became **orphaned**: still in Redis, invisible to the app.
 - **Experiment:** `curl -s -H "Authorization: Bearer $KV_REST_API_TOKEN" "$KV_REST_API_URL/keys/pvp:*"` vs `.../keys/fable2:*`. Data under the prefix the code is NOT using = this exact failure. (Confirm the live prefix first: `grep -n "fable2" lib/redis.js`.)
-- **Fix:** either re-enter the data via `/admin` (viewers, count, order, palette — shares/progress regenerate naturally), or migrate keys (RENAME each `pvp:*` key to its `fable2:*` twin; the Redis inspector in `.claude/skills/diagnostics-and-tooling/SKILL.md` enumerates them). If you ever change the prefix again, migrate in the same change — this is now a settled battle (§3.3).
+- **Fix:** either re-enter the data via `/admin` (viewers, count, order, palette — shares/progress regenerate naturally), or migrate the keys — **but migration is a production data change to live access-control state and must go through change-control's "Production data / Redis migration" gate; never run ad-hoc RENAMEs against the live database.** The diagnostics-and-tooling skill deliberately ships no migration script for exactly this reason (its redis-inspect enumerates the orphaned keys read-only, which is your evidence for the reviewed change). If you ever change the prefix again, migrate in the same reviewed change — this is now a settled battle (§3.3).
 - **Do NOT "fix" these** — they legitimately still say `pvp` and are unrelated to Redis: `THEME_STORAGE_KEY = 'pvp:theme'` (browser localStorage, `lib/theme.js:20`) and the service-worker cache name `pvp-static-v1` (`public/sw.js:4`).
 - **Docs are stale here:** README line 12 and FEATURES.md line 81 (and the comment at `lib/redis.js:18`) still say `pvp:`. The code (`lib/redis.js:19`) is the truth: **`fable2:`**. See `.claude/skills/docs-and-writing/SKILL.md` for the drift ledger.
 
 ### 2.14 `npm run build` fails locally (env-related errors)
 
 - **Cause:** `next build` executes enough of the app to want the required env vars; a fresh clone has none.
-- **Fix:** copy the CI dummy-env pattern (`.github/workflows/ci.yml:30-42`). From repo root:
+- **Fix:** run `npm run build` with the CI dummy-env block. The canonical
+  copy-pasteable block lives in config-and-env → "CI dummy env (build without
+  real services)" (synced from `.github/workflows/ci.yml`) — copy it from
+  there rather than reconstructing it:
 
 ```bash
-AUTH0_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
-APP_BASE_URL=http://localhost:3000 \
-AUTH0_DOMAIN=example.us.auth0.com \
-AUTH0_CLIENT_ID=ci-dummy \
-AUTH0_CLIENT_SECRET=ci-dummy \
-BUNNY_LIBRARY_ID=1 \
-BUNNY_API_KEY=ci-dummy \
-BUNNY_TOKEN_AUTH_KEY=ci-dummy \
-ADMIN_EMAILS=admin@example.com \
-KV_REST_API_URL=https://example.upstash.io \
-KV_REST_API_TOKEN=ci-dummy \
-npm run build
+# env block: see config-and-env → "CI dummy env (build without real services)"
+<dummy env from config-and-env> npm run build
 ```
 
 Build failures with real values set usually mean a genuinely broken change — run `npm run lint && npm test` first; they need no env.
@@ -175,7 +170,7 @@ Build failures with real values set usually mean a genuinely broken change — r
 
 ## 3. Failure archaeology — settled battles, do not re-fight
 
-Complete incident record (the repo has exactly 4 commits; 3 are incident responses).
+Complete incident record (the application code was built in 4 commits, 3 of them incident responses; later commits touch only `.claude/skills/` and don't count here).
 
 | # | Incident | Symptom | Root cause | Evidence | Status |
 |---|---|---|---|---|---|

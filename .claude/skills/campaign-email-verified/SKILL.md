@@ -44,7 +44,9 @@ grep -rn "email_verified" pages lib middleware.js
 
 **Expected (2026-07-18):** first grep hits exactly 5 files —
 `lib/guard.js` (`getSessionEmail`, feeding `requireAdmin`/`requireViewer`)
-plus the four GSSPs: `pages/index.js`, `pages/admin.js`, `pages/watch/[id].js`,
+plus the four GSSPs (GSSP = `getServerSideProps`, the server-side page code
+Next.js runs before sending any UI; glossary in the reference skill):
+`pages/index.js`, `pages/admin.js`, `pages/watch/[id].js`,
 `pages/s/[id].js` (some hits are cosmetic `session.user.name || email`
 fallbacks). Second grep hits **nothing** in app code.
 
@@ -149,12 +151,9 @@ Rollback plan for A: one `git revert` — no data, no schema, no config touched.
    ```bash
    npm run lint    # EXPECT: clean
    npm test        # EXPECT: all pass, incl. new trustedEmail suite
-   AUTH0_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
-   APP_BASE_URL=http://localhost:3000 AUTH0_DOMAIN=example.us.auth0.com \
-   AUTH0_CLIENT_ID=ci-dummy AUTH0_CLIENT_SECRET=ci-dummy BUNNY_LIBRARY_ID=1 \
-   BUNNY_API_KEY=ci-dummy BUNNY_TOKEN_AUTH_KEY=ci-dummy ADMIN_EMAILS=admin@example.com \
-   KV_REST_API_URL=https://example.upstash.io KV_REST_API_TOKEN=ci-dummy \
-   npm run build   # EXPECT: exit 0
+   # then npm run build with the CI dummy env — canonical block:
+   # config-and-env → "CI dummy env (build without real services)"
+   # EXPECT: exit 0
    ```
 
 ## Phase 4 — Validation and promotion
@@ -192,7 +191,7 @@ written down where CI can't see it.
 | Enforcing only at login/GSSP but not in `getSessionEmail` | API routes are directly reachable; the chokepoint is the guards. |
 | Making the check fail open ("if claim missing, allow") | This is an access decision; the project's fail-open idiom covers auxiliary features only. Missing claim = deny, and Phase 1 exists so you know why it's missing. |
 | Treating share recipients as automatically exempt | That's the Phase 2 decision gate — get it decided, don't assume. |
-| Upgrading `@auth0/nextjs-auth0` "while we're in here" | Separate change, separate risk; the pin discipline is a change-control non-negotiable. |
+| Upgrading `@auth0/nextjs-auth0` "while we're in here" | Separate change, separate risk — never batch a dependency bump into a security fix (change-control's dependency-change gate; the ESLint incident is the precedent for "routine" upgrades breaking things). |
 | Trusting this doc over the code | Re-run Phase 0's greps first; the app may have grown. |
 
 ## When NOT to use this skill

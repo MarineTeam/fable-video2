@@ -1,6 +1,6 @@
 ---
 name: reference
-description: "Domain-theory pack for this repo's external contracts: bunny.net Stream API + all three token-signing schemes (embed, CDN thumbnail, TUS upload), Auth0 v4 SDK specifics, Upstash Redis REST semantics, Web Push/VAPID, player.js postMessage protocol, PWA/service-worker scope, Next.js Pages Router concepts. Use when you need to understand WHY code in lib/ or pages/ is shaped the way it is, verify a signature formula, or debug a 403/401 from Bunny or Auth0. Not for step-by-step operations (see run-and-operate), triage (see debugging-playbook), or env setup (see config-and-env)."
+description: "Domain-theory pack for this repo's external contracts: bunny.net Stream API + all three token-signing schemes (embed, CDN thumbnail, TUS upload), Auth0 v4 SDK specifics, Upstash Redis REST semantics, Web Push/VAPID, player.js postMessage protocol, PWA/service-worker scope, Next.js Pages Router concepts. Use when you need to understand WHY code in lib/ or pages/ is shaped the way it is, verify a signature formula, or understand the protocol behind a 403/401 AFTER debugging-playbook's triage points here — this skill is theory only, with no symptom→fix flow. Not for step-by-step operations (see run-and-operate), live triage (see debugging-playbook), or env setup (see config-and-env)."
 ---
 
 # Reference: the external contracts this app is built on
@@ -248,7 +248,7 @@ under prefix `fable2:rl`. This repo memoizes one `Ratelimit` per
 normalized email). **`allowRequest` fails OPEN** — any thrown error returns
 `true`. Never invert this (see change-control skill). Endpoints and budgets:
 `/api/videos` 60/min/email, `/api/admin/upload` 20/hour, `/api/admin/share`
-10/min [repo].
+10/min [repo] (canonical inventory: architecture-contract).
 
 ---
 

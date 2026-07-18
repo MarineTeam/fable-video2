@@ -116,7 +116,7 @@ node .claude/skills/diagnostics-and-tooling/scripts/smoke-probe.mjs
 
 Sends **unauthenticated** requests to every page and API route and asserts the
 deny-by-default contract: pages redirect to login (30x), viewer APIs return
-401/403, all eleven `/api/admin/*` routes return 401/403, and the three
+401/403, all eleven `/api/admin/*` routes return 401/403, and the four
 deliberately public surfaces (`/api/theme` GET, manifest, sw.js, robots.txt)
 return 200. An anonymous probe cannot prove what an *approved* user can do —
 that's the manual checklist in validation-and-qa — but it proves the outer
