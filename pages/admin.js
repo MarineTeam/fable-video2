@@ -174,6 +174,8 @@ function VideosTab({
   const [shareFor, setShareFor] = useState(null); // guid
   const [copiedId, setCopiedId] = useState('');
   const [newCollection, setNewCollection] = useState('');
+  const [selected, setSelected] = useState(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
   const uploadRefs = useRef({}); // key -> { tusUpload, file, videoId }
   const fileInputRef = useRef(null);
 
@@ -273,6 +275,20 @@ function VideosTab({
     api('/api/admin/order', { method: 'POST', body: { order: next.map((v) => v.guid) } }).catch(
       () => {}
     );
+  }
+
+  function toggleSelect(guid) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(guid)) next.delete(guid);
+      else next.add(guid);
+      return next;
+    });
+  }
+
+  function clearSelect() {
+    setSelected(new Set());
+    setBulkOpen(false);
   }
 
   async function copyText(text, id) {
@@ -396,6 +412,28 @@ function VideosTab({
         <p className="muted">Clear the filter to drag-reorder.</p>
       ) : null}
 
+      {selected.size > 0 ? (
+        <div className="bulk-toolbar card card-pad">
+          <span>{selected.size} selected</span>
+          <button type="button" className="btn btn-primary btn-sm" onClick={() => setBulkOpen((v) => !v)}>
+            <LinkIcon /> Bulk share
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={clearSelect}>
+            Clear
+          </button>
+        </div>
+      ) : null}
+      {bulkOpen && selected.size > 0 ? (
+        <BulkShareForm
+          videoIds={[...selected]}
+          mailOn={mailOn}
+          onCreated={() => {
+            reloadShares();
+            clearSelect();
+          }}
+        />
+      ) : null}
+
       <div className="admin-rows">
         {shown.map((v, i) => (
           <div
@@ -415,6 +453,12 @@ function VideosTab({
                 <GripIcon />
               </span>
             ) : null}
+            <input
+              type="checkbox"
+              checked={selected.has(v.guid)}
+              onChange={() => toggleSelect(v.guid)}
+              aria-label={`Select ${v.title}`}
+            />
             {v.thumbnail ? (
               <img className="row-thumb" src={v.thumbnail} alt="" loading="lazy" />
             ) : (
@@ -618,6 +662,100 @@ function ShareForm({ videoId, mailOn, onCreated, copyText, copiedId }) {
   );
 }
 
+function BulkShareForm({ videoIds, mailOn, onCreated }) {
+  const [emailsText, setEmailsText] = useState('');
+  const [hours, setHours] = useState(72);
+  const [sendEmail, setSendEmail] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+
+  const emails = [...new Set(
+    emailsText
+      .split(/[\s,;]+/)
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean)
+  )];
+  const totalLinks = videoIds.length * emails.length;
+
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true);
+    setError('');
+    setResult(null);
+    try {
+      const data = await api('/api/admin/bulk-share', {
+        method: 'POST',
+        body: { videoIds, emails, hours: Number(hours), sendEmail },
+      });
+      setResult(data);
+      onCreated();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="card card-pad bulk-share-form" onSubmit={submit}>
+      <label className="field-block">
+        Recipients (one per line, or comma-separated)
+        <textarea
+          className="input"
+          rows={3}
+          required
+          placeholder={'alice@example.com\nbob@example.com'}
+          value={emailsText}
+          onChange={(e) => setEmailsText(e.target.value)}
+        />
+      </label>
+      <div className="field-row">
+        <label className="field-inline">
+          Expires in
+          <input
+            className="input input-narrow"
+            type="number"
+            min={1}
+            max={720}
+            value={hours}
+            onChange={(e) => setHours(e.target.value)}
+          />
+          hours
+        </label>
+        {mailOn ? (
+          <label className="field-inline">
+            <input
+              type="checkbox"
+              checked={sendEmail}
+              onChange={(e) => setSendEmail(e.target.checked)}
+            />
+            Email each recipient their links
+          </label>
+        ) : null}
+      </div>
+      <p className="muted">
+        {videoIds.length} video{videoIds.length === 1 ? '' : 's'} × {emails.length} recipient
+        {emails.length === 1 ? '' : 's'} = {totalLinks} link{totalLinks === 1 ? '' : 's'}
+      </p>
+      <button type="submit" className="btn btn-primary btn-sm" disabled={busy || totalLinks === 0}>
+        {busy ? 'Creating…' : `Create ${totalLinks || ''} link${totalLinks === 1 ? '' : 's'}`}
+      </button>
+      {error ? <span className="error-text">{error}</span> : null}
+      {result ? (
+        <ul className="bulk-share-result">
+          {result.recipients.map((r) => (
+            <li key={r.email}>
+              {r.email}: {r.links} link{r.links === 1 ? '' : 's'}
+              {mailOn && sendEmail ? (r.emailed ? ' · emailed' : ' · email failed') : ''}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </form>
+  );
+}
+
 // --------------------------------------------------------------- Viewers tab
 
 function ViewersTab({ viewers, reload }) {
@@ -754,9 +892,16 @@ function SharesTab({ shares, reload, mailOn }) {
               <span className="row-title">{s.videoTitle || s.videoId}</span>
               <span className="row-meta muted">
                 For {s.email} · created {fmtWhen(s.createdAt)} · expires {fmtWhen(s.expiresAt)}
+                {s.viewedAt ? ` · ${s.views || 1} view${(s.views || 1) === 1 ? '' : 's'}, last ${fmtWhen(s.lastViewedAt || s.viewedAt)}` : ''}
+                {s.plays ? ` · played ${s.plays}×` : ''}
+                {typeof s.furthestPercent === 'number' ? ` · watched ${s.furthestPercent}%` : ''}
               </span>
             </div>
-            {s.viewedAt ? (
+            {s.completedAt ? (
+              <span className="badge badge-ok" title={`Completed ${fmtWhen(s.completedAt)}`}>
+                Completed
+              </span>
+            ) : s.viewedAt ? (
               <span className="badge badge-ok" title={`First viewed ${fmtWhen(s.viewedAt)}`}>
                 Viewed
               </span>

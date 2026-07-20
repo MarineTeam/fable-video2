@@ -32,16 +32,24 @@ export async function getServerSideProps({ req, res, params }) {
     return { props: { state: 'mismatch', user } };
   }
 
-  // Stamp first view, preserving the remaining TTL.
-  if (!share.viewedAt) {
-    try {
-      const r = redis();
-      const ttl = await r.ttl(key);
-      if (ttl > 0) {
-        await r.set(key, { ...share, viewedAt: new Date().toISOString() }, { ex: ttl });
-      }
-    } catch {}
-  }
+  // Count every view (not just the first), preserving the remaining TTL.
+  try {
+    const r = redis();
+    const ttl = await r.ttl(key);
+    if (ttl > 0) {
+      const now = new Date().toISOString();
+      await r.set(
+        key,
+        {
+          ...share,
+          viewedAt: share.viewedAt || now,
+          views: (share.views || 0) + 1,
+          lastViewedAt: now,
+        },
+        { ex: ttl }
+      );
+    }
+  } catch {}
 
   let title = 'Shared video';
   try {
@@ -56,6 +64,7 @@ export async function getServerSideProps({ req, res, params }) {
       embedUrl: signedEmbedUrl(share.videoId),
       videoId: share.videoId,
       expiresAt: share.expiresAt || null,
+      shareId: id,
     },
   };
 }
@@ -85,7 +94,7 @@ function ShareShell({ user, children }) {
   );
 }
 
-export default function Share({ state, user, title, embedUrl, videoId, expiresAt }) {
+export default function Share({ state, user, title, embedUrl, videoId, expiresAt, shareId }) {
   if (state === 'gone') {
     return (
       <ShareShell user={user}>
@@ -112,7 +121,7 @@ export default function Share({ state, user, title, embedUrl, videoId, expiresAt
   return (
     <ShareShell user={user}>
       <h1 className="watch-title">{title}</h1>
-      <ResumablePlayer embedUrl={embedUrl} videoId={videoId} title={title} />
+      <ResumablePlayer embedUrl={embedUrl} videoId={videoId} title={title} shareId={shareId} />
       {expiresAt ? (
         <p className="muted share-expiry">
           This link expires {new Date(expiresAt).toLocaleString()}.

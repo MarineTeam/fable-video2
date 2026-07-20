@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import { requireAdmin } from '../../../lib/guard';
 import { allowRequest } from '../../../lib/ratelimit';
 import { redis, k } from '../../../lib/redis';
@@ -6,15 +5,7 @@ import { normalizeEmail, isValidEmail } from '../../../lib/auth';
 import { getVideo } from '../../../lib/bunny';
 import { mailEnabled, sendShareEmail } from '../../../lib/mail';
 import { logAction } from '../../../lib/audit';
-
-const DEFAULT_HOURS = 72;
-const MAX_HOURS = 720; // 30 days
-
-function baseUrl(req) {
-  const fromEnv = (process.env.APP_BASE_URL || '').replace(/\/$/, '');
-  if (fromEnv) return fromEnv;
-  return `https://${req.headers.host}`;
-}
+import { createShare, clampHours, baseUrl } from '../../../lib/share';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -51,19 +42,11 @@ export default async function handler(req, res) {
   }
   const recipient = normalizeEmail(email);
   if (!isValidEmail(recipient)) return res.status(400).json({ error: 'Bad recipient email' });
-  const ttlHours = Math.min(Math.max(parseInt(hours, 10) || DEFAULT_HOURS, 1), MAX_HOURS);
+  const ttlHours = clampHours(hours);
 
-  const id = crypto.randomBytes(18).toString('base64url');
-  const now = new Date();
-  const share = {
-    videoId,
-    email: recipient,
-    createdAt: now.toISOString(),
-    expiresAt: new Date(now.getTime() + ttlHours * 3600 * 1000).toISOString(),
-  };
+  let id, share;
   try {
-    await r.set(k(`share:${id}`), share, { ex: ttlHours * 3600 });
-    await r.sadd(k('shares'), id);
+    ({ id, share } = await createShare({ videoId, email: recipient, hours: ttlHours }));
   } catch {
     return res.status(500).json({ error: 'Could not create link' });
   }

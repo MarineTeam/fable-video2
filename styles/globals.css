@@ -756,6 +756,50 @@ code {
   margin-top: 0.4rem;
 }
 
+/* ---- Bulk share ---- */
+
+.bulk-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-bottom: 0.6rem;
+}
+
+.bulk-share-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+}
+
+.field-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.field-block .input {
+  font: inherit;
+  color: var(--text);
+  resize: vertical;
+}
+
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.bulk-share-result {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
 /* ---- Settings ---- */
 
 .palette-grid {
