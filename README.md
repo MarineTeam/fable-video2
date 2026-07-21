@@ -67,9 +67,10 @@ pages/
       subscribe.js        Store a viewer's Web Push subscription
       unsubscribe.js      Remove a Web Push subscription
     admin/
-      videos.js           List (ordered) / rename / set-collection / delete
+      videos.js           List (ordered, with watermark mode) / rename / set-collection / set watermark mode / delete
+      videos-bulk.js       Bulk delete / bulk assign-to-collection over a multi-selected set of videos
       viewers.js          List (with last-seen) / add (single or bulk) / remove
-      settings.js         Homepage video count
+      settings.js         Homepage video count, global watermark default + exemption list
       order.js            Custom homepage video order
       share.js            Create/resend/extend a single private share link (rate-limited)
       shares.js           List active share links (status + bundle) / revoke (soft-delete)
@@ -101,8 +102,10 @@ lib/
   mail.js                 Resend email helpers for share links (inert without RESEND_API_KEY)
   share.js                Share-link primitives: create/resend/extend/revoke, logical-expiry model
   bundle.js               Share-bundle grouping/notification logic (one place per recipient)
+  watermark.js            Layered watermark precedence (exempt > share > video > global default) + Redis helpers
+  videoAnalytics.js       Pure rollup of existing per-share tracking, grouped by video
   ratelimit.js            Sliding-window limiter (fails open)
-  __tests__/              Vitest smoke tests (auth, order, theme, push, share, bundle)
+  __tests__/              Vitest smoke tests (auth, order, theme, push, share, bundle, watermark, videoAnalytics)
 public/
   manifest.webmanifest    PWA manifest
   sw.js                   Service worker (caches only icons + manifest; push handlers)
@@ -189,11 +192,11 @@ Every push / PR to `main` runs [`.github/workflows/ci.yml`](.github/workflows/ci
 
 Tabbed layout, gated server-side to `ADMIN_EMAILS`:
 
-- **Videos** — upload (drag-and-drop, progress, cancel/retry), rename, delete, drag-to-reorder, search, encoding-status badges, per-video collection assignment, per-video private share-link creation, and multi-select **bulk share** to several recipients at once (with an optional **"email the link"** checkbox when email is configured). Also a Collections manager (create/delete).
+- **Videos** — upload (drag-and-drop, progress, cancel/retry), rename, delete, drag-to-reorder, search, encoding-status badges, per-video collection assignment and **watermark override** (Default/Always/Never), per-video private share-link creation, a collapsible **per-video analytics** panel (shares, unique recipients, views, started, completed, completion rate, avg progress — rolled up from existing share tracking), multi-select **bulk share** to several recipients at once (with an optional **"email the link"** checkbox when email is configured), and multi-select **bulk delete / bulk assign-to-collection**. Also a Collections manager (create/delete).
 - **Viewers** — add/remove approved emails, **bulk add** (paste a list), and each viewer's **last-seen** time.
-- **Shares** — every share link with recipient, expiry, **Active/Expired/Revoked** status, view count + last-viewed time, and real playback signal (plays, furthest %, Completed). Multi-select for **bulk resend / bulk extend / bulk revoke**, each reporting per-link success/failure. Per-link **resend**, **extend** (push expiry forward without a new link), and **revoke** (instant, soft-delete). Links point at a recipient's consolidated **bundle page** once they have 2+ active shares.
-- **Settings** — homepage video count, the site **color palette** (7 presets + custom, applied to all visitors), a **push broadcast** composer, and a content-protection info panel.
-- **Activity** — the most recent admin actions (add/remove viewer, share create/resend/extend/revoke including bulk actions, video rename/delete/reorder, settings, palette, collections).
+- **Shares** — every share link with recipient, expiry, **Active/Expired/Revoked** status, view count + last-viewed time, and real playback signal (plays, furthest %, Completed). Multi-select for **bulk resend / bulk extend / bulk revoke**, each reporting per-link success/failure. Per-link **resend**, **extend** (push expiry forward without a new link), and **revoke** (instant, soft-delete). Links point at a recipient's consolidated **bundle page** once they have 2+ active shares. Share creation (single and bulk) includes a **watermark** override (Default/Always/Never).
+- **Settings** — homepage video count, the site **color palette** (7 presets + custom, applied to all visitors), a **push broadcast** composer, **viewer watermark** controls (global on/off default + a viewer-exemption list), and a content-protection info panel.
+- **Activity** — the most recent admin actions (add/remove viewer, share create/resend/extend/revoke including bulk actions, video rename/delete/reorder/watermark including bulk actions, settings, palette, watermark exemptions, collections).
 - **Analytics** — total views, 30-day views, watch time, video count, a 30-day views chart, and a most-watched list.
 
 ---
@@ -244,7 +247,8 @@ Set `RESEND_API_KEY` and (recommended) `MAIL_FROM` to a Resend-verified sender. 
 - **Revoking is a soft-delete.** A revoked share link is marked, not deleted — it stays visible in the admin Shares list with a "Revoked" status, and can never be extended back to life. Extend is refused outright on a revoked link.
 - **Share expiry is decided by a stored field, not by whether the Redis record still exists.** A link's record deliberately outlives its expiry by a 60-day grace window (so an already-lapsed link can still be **extended**), but every read path (the share page, playback-event reporting, the bundle page) explicitly checks `expiresAt`/`revokedAt` rather than treating "record exists" as "link is usable".
 - **Thumbnails** are served from the CDN and, when a token key is present, are **signed** so they keep working with "Block Direct URL File Access" enabled. Requests from the app carry the site's `Referer`, so hotlink protection still blocks direct/off-site access.
-- **Rate limiting** guards the video list, upload, share-creation, bulk-share, bulk resend/extend/revoke, and share playback-event endpoints (fails open if the limiter backend is unavailable).
+- **Viewer watermark is deterrence and traceability, not DRM.** It overlays the viewer's email on playback; a determined viewer can still crop it out of a screen recording. Precedence is exemption > per-share > per-video > global default (`lib/watermark.js`), and — being an accessory, not access control — any Redis read behind it fails open (no watermark shown) rather than blocking playback on an infrastructure hiccup.
+- **Rate limiting** guards the video list, upload, share-creation, bulk-share, bulk resend/extend/revoke, bulk video ops, and share playback-event endpoints (fails open if the limiter backend is unavailable).
 - **Idle sign-out** logs users out after 30 minutes of inactivity.
 - Direct bunny.net CDN file URLs (`*.b-cdn.net/.../playlist.m3u8`, `play_720p.mp4`) are never used by the app; if you want them fully locked down, enable **Block Direct URL File Access** on the library's Security tab.
 

@@ -28,21 +28,26 @@ Current as of **v2.0.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - Every play uses a **signed, time-limited bunny.net embed token**, generated fresh per request — never a permanent or public URL.
 - Direct bunny.net CDN file URLs are never used or exposed by the app.
 - Thumbnail requests carry the site's `Referer`, so hotlink protection blocks direct/off-site access while the app still works.
+- **Viewer watermark** — an optional overlay of the signed-in viewer's email on the player itself, for traceability, on both `/watch/[id]` and private share links (`/s/[id]`). Layered and most-specific-wins: per-share choice (Default/Always/Never, set when creating a link) > per-video choice _(admin, Videos tab)_ > global default _(admin, Settings tab)_ — and an **exempted** viewer _(admin, Settings tab)_ never sees a watermark no matter what else is set. Honest limitation: this is deterrence and traceability, not DRM — a determined viewer can still crop it out of a screen recording.
 
 ## Video management _(admin)_
 - **Upload directly from the browser to bunny.net** — TUS resumable upload with a progress bar, **drag-and-drop**, and **cancel/retry** for in-progress uploads (a cancelled upload cleans up its half-created video). The Bunny API key never reaches the client.
 - **Encoding status** — per-video "Processing %" / "Failed" badges, auto-refreshing while anything is encoding.
 - **Rename** videos inline.
 - **Delete** videos (removes from bunny.net and prunes them from the saved order).
+- **Bulk video operations** — multi-select any number of videos and **bulk delete** or **bulk assign to a collection** in one action, mirroring the bulk-share UX: every video is processed independently, so one failure never blocks the rest, and per-video success/failure is reported. Bulk delete also prunes the saved order in one pass (capped at 50 videos per action).
 - **Drag-to-reorder** the library.
 - **Search/filter** the library.
 - **Collections** — create/delete collections and assign each video to one.
+- **Per-video watermark override** — set a video to always/never watermark regardless of the global default (see Video playback & security above); stored as portal-only metadata, never sent to bunny.net.
+- **Per-video analytics** — a collapsible panel per video rolling up its existing share tracking: total shares, unique recipients, views, started, completed, completion rate, and average watched %. Reads only fields already stored by the share flow below — adds no new tracking and no new fetch (computed from the shares already loaded for the Shares tab).
 
 ## Private share links (per-recipient sharing) _(admin)_
 - Generate a one-off private link for any video, tied to a specific recipient email.
 - **Forced login** — opening the link requires an Auth0 login and only plays if the logged-in email matches the one specified.
 - Wrong-account attempts show a generic mismatch message — **the intended recipient's email is never revealed**.
 - **Adjustable expiry** per link (default 72 hours, capped at 720 / 30 days).
+- **Per-share watermark override** — Default/Always/Never selector in both the single and bulk share forms, stored only when explicitly chosen; overrides the video's and the global watermark setting for that link (see Video playback & security above).
 - **Bulk share** _(admin)_ — multi-select any number of videos in the Videos tab and share all of them with several recipients in one action; every recipient × video pair gets its own independently-revocable link (capped at 50 videos, 50 recipients, 300 total links per action).
 - **Email delivery** _(opt-in)_ — a checkbox emails the link(s) straight to each recipient via [Resend](https://resend.com), so the admin no longer has to copy-and-send by hand. Best-effort: a mail failure never blocks link creation.
 - **Bundles: one place per recipient, not one email per action** — once a recipient has 2+ currently-active shares (from any single-share or bulk-share action, in any order), they automatically get one consolidated **bundle page** (`/b/[id]`) listing everything shared with them, and every later notification becomes one updated email pointing at that page instead of a new standalone email. Their first-ever share still gets a plain single-link email. Signing in once (the same Auth0 login every share already requires) unlocks the bundle page and every individual link addressed to that email — there's no separate re-verification step. The bundle page is a pure grouping list of ids; each item's title, expiry, and status is always read live from its own share record, so revoking or expiring one item is reflected instantly.
@@ -58,6 +63,8 @@ Current as of **v2.0.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - **Viewer last-seen** — each viewer's most recent activity time.
 - **Activity / audit log** — the most recent admin actions (viewer add/remove, share create/resend/extend/revoke including bulk actions, video rename/delete, collection create/delete, settings, palette), each with actor and time. Logging is best-effort so it never breaks the underlying action.
 - **Analytics dashboard** — total views, 30-day views, watch time, video count, a 30-day views bar chart, and a most-watched list (from bunny.net video stats + the statistics API).
+- **Per-video analytics** — see Video management above.
+- **Viewer watermark settings** — global on/off default and a viewer-exemption list (see Video playback & security above).
 - **Content-protection panel** — explains the tokenized-playback model and the bunny.net "Block Direct URL File Access" setting.
 
 ## Admin panel structure _(admin)_
@@ -80,11 +87,11 @@ Current as of **v2.0.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 
 ## Platform, quality & observability
 - Hosted on Vercel; dependencies install automatically during deploy (no local Node/npm required to ship).
-- Settings, viewers, order, share records, bundles, watch history, push subscriptions, the theme, and the audit log are stored in Upstash Redis (via Vercel Storage), editable live from `/admin` without redeploying. All keys are namespaced with a `fable2:` prefix.
+- Settings, viewers, order, share records, bundles, watermark settings, watch history, push subscriptions, the theme, and the audit log are stored in Upstash Redis (via Vercel Storage), editable live from `/admin` without redeploying. All keys are namespaced with a `fable2:` prefix.
 - Share expiry is a logical field (`expiresAt`), not raw Redis TTL — a link's own Redis record actually outlives its expiry by a 60-day grace window so an already-lapsed-but-not-revoked link can still be **extended**. All read paths (the share page, playback events, the bundle page) check `expiresAt`/`revokedAt` explicitly rather than relying on the record simply being gone.
 - **Opt-in Sentry error monitoring** — modern instrumentation-file setup (client/server/edge); inert until `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` are set.
 - **CI pipeline** — GitHub Actions runs lint + tests + build on every push/PR to `main`, catching breakage before Vercel deploys.
-- **Smoke tests** — Vitest coverage for the auth check, video-ordering logic, theme helpers, and push logic.
+- **Smoke tests** — Vitest coverage for the auth check, video-ordering logic, theme helpers, push logic, share/bundle logic, watermark precedence, and the per-video analytics rollup.
 
 ## Configuration knobs (environment)
 - `BUNNY_CDN_HOSTNAME` — enables thumbnails.

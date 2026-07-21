@@ -34,7 +34,7 @@ export default async function handler(req, res) {
   }
 
   // Create a new link.
-  const { videoId, email, hours, sendEmail } = req.body || {};
+  const { videoId, email, hours, sendEmail, watermark } = req.body || {};
   if (typeof videoId !== 'string' || !videoId || videoId.length > 64) {
     return res.status(400).json({ error: 'Bad videoId' });
   }
@@ -44,7 +44,7 @@ export default async function handler(req, res) {
 
   let id, share;
   try {
-    ({ id, share } = await createShare({ videoId, email: recipient, hours: ttlHours }));
+    ({ id, share } = await createShare({ videoId, email: recipient, hours: ttlHours, watermark }));
   } catch {
     return res.status(500).json({ error: 'Could not create link' });
   }

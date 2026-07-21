@@ -9,6 +9,7 @@ import { redis, k } from '../../../lib/redis';
 import { applyOrder } from '../../../lib/order';
 import { announceNewVideos } from '../../../lib/push';
 import { logAction } from '../../../lib/audit';
+import { getVideoModes, setVideoMode, clampWatermarkMode } from '../../../lib/watermark';
 
 export default async function handler(req, res) {
   const admin = await requireAdmin(req, res);
@@ -23,6 +24,7 @@ export default async function handler(req, res) {
       await announceNewVideos(items).catch(() => {});
       const orderRaw = await r.get(k('order')).catch(() => null);
       const ordered = applyOrder(items, Array.isArray(orderRaw) ? orderRaw : []);
+      const watermarkModes = await getVideoModes(ordered.map((v) => v.guid));
       return res.json({
         videos: ordered.map((v) => ({
           guid: v.guid,
@@ -34,6 +36,7 @@ export default async function handler(req, res) {
           collectionId: v.collectionId || '',
           dateUploaded: v.dateUploaded || null,
           thumbnail: thumbnailUrl(v),
+          watermarkMode: watermarkModes[v.guid] || 'default',
         })),
       });
     } catch {
@@ -42,16 +45,26 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'PUT') {
-    const { id, title, collectionId } = req.body || {};
+    const { id, title, collectionId, watermarkMode } = req.body || {};
     if (typeof id !== 'string' || !id) return res.status(400).json({ error: 'Bad id' });
     const fields = {};
     if (typeof title === 'string' && title.trim()) fields.title = title.trim().slice(0, 200);
     if (typeof collectionId === 'string') fields.collectionId = collectionId;
-    if (!Object.keys(fields).length) return res.status(400).json({ error: 'Nothing to update' });
+    const hasWatermark = watermarkMode !== undefined;
+    if (!Object.keys(fields).length && !hasWatermark) {
+      return res.status(400).json({ error: 'Nothing to update' });
+    }
     try {
-      await updateVideo(id, fields);
-      if (fields.title) await logAction(admin, 'video.rename', `${id} → "${fields.title}"`);
-      if ('collectionId' in fields) await logAction(admin, 'video.collection', id);
+      if (Object.keys(fields).length) {
+        await updateVideo(id, fields);
+        if (fields.title) await logAction(admin, 'video.rename', `${id} → "${fields.title}"`);
+        if ('collectionId' in fields) await logAction(admin, 'video.collection', id);
+      }
+      // Watermark mode is portal-only metadata, never sent to Bunny.
+      if (hasWatermark) {
+        const mode = await setVideoMode(id, clampWatermarkMode(watermarkMode));
+        await logAction(admin, 'video.watermark', `${id} → ${mode}`);
+      }
       return res.json({ ok: true });
     } catch {
       return res.status(502).json({ error: 'Update failed' });

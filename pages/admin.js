@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AppShell from '../components/AppShell';
 import {
   CheckIcon,
@@ -14,6 +14,7 @@ import {
 import { auth0 } from '../lib/auth0';
 import { isAdmin, normalizeEmail } from '../lib/auth';
 import { PRESETS, COLOR_KEYS, applyTheme, validateTheme, THEME_STORAGE_KEY } from '../lib/theme';
+import { rollupSharesByVideo } from '../lib/videoAnalytics';
 
 // Server-side gate: non-admins are redirected before any admin UI is sent.
 export async function getServerSideProps({ req, res }) {
@@ -110,6 +111,10 @@ export default function Admin({ user, mailOn, pushOn }) {
     return () => clearInterval(t);
   }, [videos, loadVideos]);
 
+  // Per-video analytics panel is a pure rollup of the shares already loaded
+  // for the Shares tab — no extra fetch, no new tracking.
+  const shareRollup = useMemo(() => rollupSharesByVideo(shares), [shares]);
+
   return (
     <AppShell user={user} isAdmin approved wide>
       <h1>Admin</h1>
@@ -144,6 +149,7 @@ export default function Admin({ user, mailOn, pushOn }) {
           reloadCollections={loadCollections}
           reloadShares={loadShares}
           mailOn={mailOn}
+          shareRollup={shareRollup}
         />
       ) : null}
       {tab === 'Viewers' ? <ViewersTab viewers={viewers} reload={loadViewers} /> : null}
@@ -165,6 +171,7 @@ function VideosTab({
   reloadCollections,
   reloadShares,
   mailOn,
+  shareRollup,
 }) {
   const [filter, setFilter] = useState('');
   const [uploads, setUploads] = useState([]);
@@ -176,6 +183,10 @@ function VideosTab({
   const [newCollection, setNewCollection] = useState('');
   const [selected, setSelected] = useState(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkCollection, setBulkCollection] = useState('');
+  const [bulkVideoBusy, setBulkVideoBusy] = useState(false);
+  const [bulkVideoResult, setBulkVideoResult] = useState(null);
+  const [openAnalytics, setOpenAnalytics] = useState(new Set());
   const uploadRefs = useRef({}); // key -> { tusUpload, file, videoId }
   const fileInputRef = useRef(null);
 
@@ -289,6 +300,64 @@ function VideosTab({
   function clearSelect() {
     setSelected(new Set());
     setBulkOpen(false);
+    setBulkVideoResult(null);
+  }
+
+  function toggleAnalytics(guid) {
+    setOpenAnalytics((prev) => {
+      const next = new Set(prev);
+      if (next.has(guid)) next.delete(guid);
+      else next.add(guid);
+      return next;
+    });
+  }
+
+  async function setVideoWatermark(guid, watermarkMode) {
+    try {
+      await api('/api/admin/videos', { method: 'PUT', body: { id: guid, watermarkMode } });
+      reloadVideos();
+    } catch {}
+  }
+
+  // Every id is processed independently server-side, same as bulk-share.
+  async function bulkDeleteVideos() {
+    if (
+      !window.confirm(
+        `Delete ${selected.size} video(s)? This removes them from bunny.net permanently.`
+      )
+    )
+      return;
+    setBulkVideoBusy(true);
+    setBulkVideoResult(null);
+    try {
+      const data = await api('/api/admin/videos-bulk', {
+        method: 'POST',
+        body: { action: 'delete', ids: [...selected] },
+      });
+      setBulkVideoResult(data.results);
+      reloadVideos();
+      setSelected(new Set());
+      setBulkOpen(false);
+    } catch {
+    } finally {
+      setBulkVideoBusy(false);
+    }
+  }
+
+  async function bulkAssignCollection() {
+    setBulkVideoBusy(true);
+    setBulkVideoResult(null);
+    try {
+      const data = await api('/api/admin/videos-bulk', {
+        method: 'POST',
+        body: { action: 'assign-collection', ids: [...selected], collectionId: bulkCollection },
+      });
+      setBulkVideoResult(data.results);
+      reloadVideos();
+    } catch {
+    } finally {
+      setBulkVideoBusy(false);
+    }
   }
 
   async function copyText(text, id) {
@@ -418,10 +487,48 @@ function VideosTab({
           <button type="button" className="btn btn-primary btn-sm" onClick={() => setBulkOpen((v) => !v)}>
             <LinkIcon /> Bulk share
           </button>
+          <select
+            className="select"
+            value={bulkCollection}
+            onChange={(e) => setBulkCollection(e.target.value)}
+            aria-label="Bulk assign collection"
+          >
+            <option value="">No collection</option>
+            {collections.map((c) => (
+              <option key={c.guid} value={c.guid}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={bulkVideoBusy}
+            onClick={bulkAssignCollection}
+          >
+            Assign collection
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm danger"
+            disabled={bulkVideoBusy}
+            onClick={bulkDeleteVideos}
+          >
+            <TrashIcon /> Delete {selected.size}
+          </button>
           <button type="button" className="btn btn-ghost btn-sm" onClick={clearSelect}>
             Clear
           </button>
         </div>
+      ) : null}
+      {bulkVideoResult ? (
+        <ul className="bulk-share-result">
+          {bulkVideoResult.map((r) => (
+            <li key={r.id}>
+              {r.id}: {r.ok ? 'done' : r.error || 'failed'}
+            </li>
+          ))}
+        </ul>
       ) : null}
       {bulkOpen && selected.size > 0 ? (
         <BulkShareForm
@@ -516,12 +623,26 @@ function VideosTab({
                 </option>
               ))}
             </select>
+            <select
+              className="select"
+              value={v.watermarkMode || 'default'}
+              onChange={(e) => setVideoWatermark(v.guid, e.target.value)}
+              aria-label="Watermark"
+              title="Overrides the global watermark default for this video (a per-share choice overrides this in turn)"
+            >
+              <option value="default">Watermark: default</option>
+              <option value="always">Watermark: always</option>
+              <option value="never">Watermark: never</option>
+            </select>
             <button
               type="button"
               className="btn btn-ghost btn-sm"
               onClick={() => setShareFor(shareFor === v.guid ? null : v.guid)}
             >
               <LinkIcon /> Share
+            </button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => toggleAnalytics(v.guid)}>
+              Analytics
             </button>
             <button
               type="button"
@@ -538,6 +659,9 @@ function VideosTab({
                 copyText={copyText}
                 copiedId={copiedId}
               />
+            ) : null}
+            {openAnalytics.has(v.guid) ? (
+              <VideoAnalyticsPanel stats={shareRollup[v.guid]} />
             ) : null}
           </div>
         ))}
@@ -578,10 +702,57 @@ function VideosTab({
   );
 }
 
+// Collapsible rollup of existing per-share tracking for one video — reads
+// only fields already stored (see lib/videoAnalytics.js), tracks nothing new.
+function VideoAnalyticsPanel({ stats }) {
+  if (!stats) {
+    return (
+      <div className="analytics-panel">
+        <p className="muted">No shares yet for this video.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="analytics-panel">
+      <div className="stat-cards mini">
+        <div className="stat card card-pad">
+          <span className="stat-num">{stats.shares}</span>
+          <span className="stat-label">Shares</span>
+        </div>
+        <div className="stat card card-pad">
+          <span className="stat-num">{stats.uniqueRecipients}</span>
+          <span className="stat-label">Recipients</span>
+        </div>
+        <div className="stat card card-pad">
+          <span className="stat-num">{stats.views}</span>
+          <span className="stat-label">Views</span>
+        </div>
+        <div className="stat card card-pad">
+          <span className="stat-num">{stats.started}</span>
+          <span className="stat-label">Started</span>
+        </div>
+        <div className="stat card card-pad">
+          <span className="stat-num">{stats.completed}</span>
+          <span className="stat-label">Completed</span>
+        </div>
+        <div className="stat card card-pad">
+          <span className="stat-num">{Math.round(stats.completionRate * 100)}%</span>
+          <span className="stat-label">Completion rate</span>
+        </div>
+        <div className="stat card card-pad">
+          <span className="stat-num">{stats.avgProgress}%</span>
+          <span className="stat-label">Avg progress</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ShareForm({ videoId, mailOn, onCreated, copyText, copiedId }) {
   const [email, setEmail] = useState('');
   const [hours, setHours] = useState(72);
   const [sendEmail, setSendEmail] = useState(false);
+  const [watermark, setWatermark] = useState('default');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
@@ -593,7 +764,7 @@ function ShareForm({ videoId, mailOn, onCreated, copyText, copiedId }) {
     try {
       const data = await api('/api/admin/share', {
         method: 'POST',
-        body: { videoId, email, hours: Number(hours), sendEmail },
+        body: { videoId, email, hours: Number(hours), sendEmail, watermark },
       });
       setResult(data);
       onCreated();
@@ -625,6 +796,14 @@ function ShareForm({ videoId, mailOn, onCreated, copyText, copiedId }) {
           onChange={(e) => setHours(e.target.value)}
         />
         hours
+      </label>
+      <label className="field-inline">
+        Watermark
+        <select className="select" value={watermark} onChange={(e) => setWatermark(e.target.value)}>
+          <option value="default">Default</option>
+          <option value="always">Always</option>
+          <option value="never">Never</option>
+        </select>
       </label>
       {mailOn ? (
         <label className="field-inline">
@@ -666,6 +845,7 @@ function BulkShareForm({ videoIds, mailOn, onCreated }) {
   const [emailsText, setEmailsText] = useState('');
   const [hours, setHours] = useState(72);
   const [sendEmail, setSendEmail] = useState(false);
+  const [watermark, setWatermark] = useState('default');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
@@ -686,7 +866,7 @@ function BulkShareForm({ videoIds, mailOn, onCreated }) {
     try {
       const data = await api('/api/admin/bulk-share', {
         method: 'POST',
-        body: { videoIds, emails, hours: Number(hours), sendEmail },
+        body: { videoIds, emails, hours: Number(hours), sendEmail, watermark },
       });
       setResult(data);
       onCreated();
@@ -722,6 +902,14 @@ function BulkShareForm({ videoIds, mailOn, onCreated }) {
             onChange={(e) => setHours(e.target.value)}
           />
           hours
+        </label>
+        <label className="field-inline">
+          Watermark
+          <select className="select" value={watermark} onChange={(e) => setWatermark(e.target.value)}>
+            <option value="default">Default</option>
+            <option value="always">Always</option>
+            <option value="never">Never</option>
+          </select>
         </label>
         {mailOn ? (
           <label className="field-inline">
@@ -1099,10 +1287,18 @@ function SettingsTab({ pushOn }) {
   const [bTitle, setBTitle] = useState('');
   const [bBody, setBBody] = useState('');
   const [bStatus, setBStatus] = useState('');
+  const [wmDefault, setWmDefault] = useState(false);
+  const [wmExempt, setWmExempt] = useState([]);
+  const [wmNewExempt, setWmNewExempt] = useState('');
+  const [wmStatus, setWmStatus] = useState('');
 
   useEffect(() => {
     api('/api/admin/settings')
-      .then((d) => setHomeCount(String(d.homeCount)))
+      .then((d) => {
+        setHomeCount(String(d.homeCount));
+        setWmDefault(Boolean(d.watermarkDefault));
+        setWmExempt(d.watermarkExempt || []);
+      })
       .catch(() => {});
     fetch('/api/theme')
       .then((r) => (r.ok ? r.json() : null))
@@ -1145,6 +1341,41 @@ function SettingsTab({ pushOn }) {
     } catch (err) {
       setPaletteStatus(err.message);
     }
+  }
+
+  async function toggleWmDefault(on) {
+    setWmStatus('');
+    try {
+      const data = await api('/api/admin/settings', { method: 'POST', body: { watermarkDefault: on } });
+      setWmDefault(Boolean(data.watermarkDefault));
+      setWmStatus('Saved.');
+    } catch (err) {
+      setWmStatus(err.message);
+    }
+  }
+
+  async function addWmExempt(e) {
+    e.preventDefault();
+    const target = wmNewExempt.trim();
+    if (!target) return;
+    setWmStatus('');
+    try {
+      const data = await api('/api/admin/settings', {
+        method: 'POST',
+        body: { addWatermarkExempt: target },
+      });
+      setWmExempt(data.exempt || []);
+      setWmNewExempt('');
+    } catch (err) {
+      setWmStatus(err.message);
+    }
+  }
+
+  async function removeWmExempt(target) {
+    try {
+      await api('/api/admin/settings', { method: 'DELETE', body: { removeWatermarkExempt: target } });
+      setWmExempt((list) => list.filter((e) => e !== target));
+    } catch {}
   }
 
   async function broadcast(e) {
@@ -1261,6 +1492,53 @@ function SettingsTab({ pushOn }) {
           </form>
         </div>
       ) : null}
+
+      <div className="card card-pad">
+        <h2 className="section-title">Viewer watermark</h2>
+        <p className="muted">
+          Overlays the viewer&apos;s email on playback for traceability. The global
+          default set here can be overridden per video (Videos tab) or per share
+          link (share forms) — the most specific choice wins, and an exempted
+          viewer never sees a watermark regardless of any other setting.
+        </p>
+        <label className="field-inline">
+          <input
+            type="checkbox"
+            checked={wmDefault}
+            onChange={(e) => toggleWmDefault(e.target.checked)}
+          />
+          Watermark by default
+        </label>
+        <form className="inline-form" onSubmit={addWmExempt}>
+          <input
+            className="input"
+            type="email"
+            placeholder="Exempt viewer email"
+            value={wmNewExempt}
+            onChange={(e) => setWmNewExempt(e.target.value)}
+          />
+          <button type="submit" className="btn btn-primary btn-sm">
+            Exempt
+          </button>
+        </form>
+        <div className="chips">
+          {wmExempt.map((email) => (
+            <span key={email} className="chip">
+              {email}
+              <button
+                type="button"
+                className="btn-icon"
+                title="Remove exemption"
+                onClick={() => removeWmExempt(email)}
+              >
+                <XIcon width={12} height={12} />
+              </button>
+            </span>
+          ))}
+          {wmExempt.length === 0 ? <span className="muted">No exemptions.</span> : null}
+        </div>
+        {wmStatus ? <p className="muted">{wmStatus}</p> : null}
+      </div>
 
       <div className="card card-pad">
         <h2 className="section-title">Content protection</h2>

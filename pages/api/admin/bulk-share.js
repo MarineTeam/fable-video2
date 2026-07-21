@@ -22,7 +22,7 @@ export default async function handler(req, res) {
     return res.status(429).json({ error: 'Too many requests' });
   }
 
-  const { videoIds, emails, hours, sendEmail } = req.body || {};
+  const { videoIds, emails, hours, sendEmail, watermark } = req.body || {};
   if (!Array.isArray(videoIds) || videoIds.length === 0 || videoIds.length > MAX_VIDEOS) {
     return res.status(400).json({ error: `Pick 1-${MAX_VIDEOS} videos` });
   }
@@ -61,7 +61,7 @@ export default async function handler(req, res) {
     await Promise.all(
       recipients.flatMap((email) =>
         uniqueVideoIds.map(async (videoId) => {
-          const { id, share } = await createShare({ videoId, email, hours: ttlHours });
+          const { id, share } = await createShare({ videoId, email, hours: ttlHours, watermark });
           created += 1;
           linksByRecipient.get(email).push({
             id,
