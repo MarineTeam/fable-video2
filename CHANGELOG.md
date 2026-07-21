@@ -17,10 +17,14 @@ commit history (`git log --oneline`).
   not access control: any Redis read behind it fails open (no watermark)
   rather than blocking or altering playback.
 - **Per-video analytics** _(admin)_ — a collapsible panel per video in the
-  Videos tab rolling up the per-share tracking that already exists: total
-  shares, unique recipients, views, started, completed, completion rate, and
-  average watched %. Computed client-side from the shares already loaded for
-  the Shares tab (`lib/videoAnalytics.js`) — no new tracking, no new fetch.
+  Videos tab, and a "Share performance by video" list in the Analytics tab,
+  both rolling up the per-share tracking that already exists: total shares,
+  unique recipients, views, started, completed, completion rate, and average
+  watched %. Computed client-side from the shares already loaded for the
+  Shares tab (`lib/videoAnalytics.js`) — no new tracking, no new fetch. The
+  rollup also captures each video's title from the share records themselves
+  (already attached by the shares API), so it survives the video later being
+  deleted from bunny.net.
 - **Bulk video operations** _(admin)_ — multi-select videos in the Videos tab
   to bulk-delete or bulk-assign-to-collection, mirroring the existing
   bulk-share UX: every video is processed independently server-side, so one

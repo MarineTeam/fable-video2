@@ -40,7 +40,7 @@ Current as of **v2.0.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - **Search/filter** the library.
 - **Collections** — create/delete collections and assign each video to one.
 - **Per-video watermark override** — set a video to always/never watermark regardless of the global default (see Video playback & security above); stored as portal-only metadata, never sent to bunny.net.
-- **Per-video analytics** — a collapsible panel per video rolling up its existing share tracking: total shares, unique recipients, views, started, completed, completion rate, and average watched %. Reads only fields already stored by the share flow below — adds no new tracking and no new fetch (computed from the shares already loaded for the Shares tab).
+- **Per-video analytics** — a collapsible panel per video rolling up its existing share tracking: total shares, unique recipients, views, started, completed, completion rate, and average watched %. Reads only fields already stored by the share flow below — adds no new tracking and no new fetch (computed from the shares already loaded for the Shares tab). The same rollup is also listed, sorted by shares, in the Analytics tab's **Share performance by video**.
 
 ## Private share links (per-recipient sharing) _(admin)_
 - Generate a one-off private link for any video, tied to a specific recipient email.
@@ -62,8 +62,7 @@ Current as of **v2.0.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - **Approved viewer management** — add/remove emails, with **bulk add** (paste comma/space/newline-separated lists; validated + deduped).
 - **Viewer last-seen** — each viewer's most recent activity time.
 - **Activity / audit log** — the most recent admin actions (viewer add/remove, share create/resend/extend/revoke including bulk actions, video rename/delete, collection create/delete, settings, palette), each with actor and time. Logging is best-effort so it never breaks the underlying action.
-- **Analytics dashboard** — total views, 30-day views, watch time, video count, a 30-day views bar chart, and a most-watched list (from bunny.net video stats + the statistics API).
-- **Per-video analytics** — see Video management above.
+- **Analytics dashboard** — total views, 30-day views, watch time, video count, a 30-day views bar chart, and a most-watched list (from bunny.net video stats + the statistics API), plus a **Share performance by video** list (shares, recipients, views, started, completed, completion rate, avg progress — see Video management above for the same rollup as a per-video collapsible panel).
 - **Viewer watermark settings** — global on/off default and a viewer-exemption list (see Video playback & security above).
 - **Content-protection panel** — explains the tokenized-playback model and the bunny.net "Block Direct URL File Access" setting.
 

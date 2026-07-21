@@ -156,7 +156,7 @@ export default function Admin({ user, mailOn, pushOn }) {
       {tab === 'Shares' ? <SharesTab shares={shares} reload={loadShares} mailOn={mailOn} /> : null}
       {tab === 'Settings' ? <SettingsTab pushOn={pushOn} /> : null}
       {tab === 'Activity' ? <ActivityTab /> : null}
-      {tab === 'Analytics' ? <AnalyticsTab /> : null}
+      {tab === 'Analytics' ? <AnalyticsTab shareRollup={shareRollup} /> : null}
     </AppShell>
   );
 }
@@ -1589,7 +1589,7 @@ function ActivityTab() {
 
 // ------------------------------------------------------------- Analytics tab
 
-function AnalyticsTab() {
+function AnalyticsTab({ shareRollup }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
 
@@ -1603,6 +1603,9 @@ function AnalyticsTab() {
   if (!data) return <p className="muted">Loading…</p>;
 
   const max = Math.max(1, ...data.chart.map((d) => d.views));
+  const sharePerformance = Object.entries(shareRollup || {})
+    .map(([videoId, stats]) => ({ videoId, ...stats }))
+    .sort((a, b) => b.shares - a.shares || b.views - a.views);
   return (
     <div className="tab-body">
       <div className="stat-cards">
@@ -1647,6 +1650,26 @@ function AnalyticsTab() {
           </div>
         ))}
         {data.top.length === 0 ? <p className="empty">No stats yet.</p> : null}
+      </div>
+
+      <div className="card card-pad">
+        <h2 className="section-title">Share performance by video</h2>
+        <p className="muted">
+          Rolled up from existing share tracking — reads no new data, adds no new
+          tracking. Sorted by shares.
+        </p>
+        {sharePerformance.map((v) => (
+          <div key={v.videoId} className="top-row">
+            <span>{v.videoTitle}</span>
+            <span className="muted">
+              {v.shares} share{v.shares === 1 ? '' : 's'} · {v.uniqueRecipients} recipient
+              {v.uniqueRecipients === 1 ? '' : 's'} · {v.views} view{v.views === 1 ? '' : 's'} ·{' '}
+              {v.started} started · {v.completed} completed ({Math.round(v.completionRate * 100)}%) ·{' '}
+              {v.avgProgress}% avg progress
+            </span>
+          </div>
+        ))}
+        {sharePerformance.length === 0 ? <p className="empty">No shares yet.</p> : null}
       </div>
     </div>
   );

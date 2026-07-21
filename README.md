@@ -197,7 +197,7 @@ Tabbed layout, gated server-side to `ADMIN_EMAILS`:
 - **Shares** — every share link with recipient, expiry, **Active/Expired/Revoked** status, view count + last-viewed time, and real playback signal (plays, furthest %, Completed). Multi-select for **bulk resend / bulk extend / bulk revoke**, each reporting per-link success/failure. Per-link **resend**, **extend** (push expiry forward without a new link), and **revoke** (instant, soft-delete). Links point at a recipient's consolidated **bundle page** once they have 2+ active shares. Share creation (single and bulk) includes a **watermark** override (Default/Always/Never).
 - **Settings** — homepage video count, the site **color palette** (7 presets + custom, applied to all visitors), a **push broadcast** composer, **viewer watermark** controls (global on/off default + a viewer-exemption list), and a content-protection info panel.
 - **Activity** — the most recent admin actions (add/remove viewer, share create/resend/extend/revoke including bulk actions, video rename/delete/reorder/watermark including bulk actions, settings, palette, watermark exemptions, collections).
-- **Analytics** — total views, 30-day views, watch time, video count, a 30-day views chart, and a most-watched list.
+- **Analytics** — total views, 30-day views, watch time, video count, a 30-day views chart, a most-watched list, and a **share performance by video** list (shares, recipients, views, started, completed, completion rate, avg progress — the same rollup as the Videos tab's per-video panel, no extra fetch).
 
 ---
 
