@@ -3,6 +3,46 @@
 All notable changes to the Marine Video Portal. Dates are UTC, matching the
 commit history (`git log --oneline`).
 
+## 2026-07-21 — Viewer watermarking, per-video analytics, bulk video ops
+
+- **Viewer watermark** — an optional overlay of the viewer's email on
+  playback, for traceability, shown on both private share links (`/s/[id]`)
+  and the regular library (`/watch/[id]`). Layered, most-specific-wins
+  precedence: a per-share choice (Default/Always/Never, set in either share
+  form) overrides a per-video choice (set per row in the Videos tab), which
+  overrides the global default (Settings tab) — and an **exempted** viewer
+  never sees a watermark regardless of any of the above. Pure precedence
+  logic lives in `lib/watermark.js` (`resolveWatermark`), unit-tested for
+  every override order. A watermark is a deterrence/traceability accessory,
+  not access control: any Redis read behind it fails open (no watermark)
+  rather than blocking or altering playback.
+- **Per-video analytics** _(admin)_ — a collapsible panel per video in the
+  Videos tab, and a "Share performance by video" list in the Analytics tab,
+  both rolling up the per-share tracking that already exists: total shares,
+  unique recipients, views, started, completed, completion rate, and average
+  watched %. Computed client-side from the shares already loaded for the
+  Shares tab (`lib/videoAnalytics.js`) — no new tracking, no new fetch. The
+  rollup also captures each video's title from the share records themselves
+  (already attached by the shares API), so it survives the video later being
+  deleted from bunny.net.
+- **Bulk video operations** _(admin)_ — multi-select videos in the Videos tab
+  to bulk-delete or bulk-assign-to-collection, mirroring the existing
+  bulk-share UX: every video is processed independently server-side, so one
+  failure never aborts the rest of the batch, and per-video success/failure
+  is reported. New `pages/api/admin/videos-bulk.js`.
+- New Redis keys: `settings:watermarkDefault` (global boolean),
+  `watermark:video` (hash, videoId → mode, only non-default entries),
+  `watermark-exempt` (set of exempt viewer emails). `share:<id>` gained an
+  optional `watermark` field (stored only when explicitly set to
+  `always`/`never`).
+- Extended: `pages/api/admin/settings.js` (watermark default + exemption
+  add/remove), `pages/api/admin/videos.js` (GET returns `watermarkMode` per
+  video; PUT accepts it as portal-only metadata, never sent to bunny.net),
+  `pages/api/admin/share.js` / `bulk-share.js` (accept `watermark` on
+  create), `lib/share.js` (`createShare` stores it additively), `pages/s/[id].js`
+  / `pages/watch/[id].js` (resolve and pass to the player),
+  `components/ResumablePlayer.js` (renders the overlay).
+
 ## 2026-07-21 — Bulk share actions, extend, and consolidated bundles
 
 - **Bulk resend / bulk revoke / bulk extend** — multi-select any number of

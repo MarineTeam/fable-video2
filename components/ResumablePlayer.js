@@ -14,7 +14,15 @@ function postShareEvent(shareId, payload) {
 // When shareId is set (private share links only), also reports real
 // playback signal — first play, furthest progress %, completion — instead
 // of the per-viewer resume history used on regular watch pages.
-export default function ResumablePlayer({ embedUrl, videoId, initialTime = 0, title = '', shareId = '' }) {
+export default function ResumablePlayer({
+  embedUrl,
+  videoId,
+  initialTime = 0,
+  title = '',
+  shareId = '',
+  watermark = false,
+  watermarkLabel = '',
+}) {
   const iframeRef = useRef(null);
   const lastSentRef = useRef(0);
   const playedRef = useRef(false);
@@ -98,6 +106,11 @@ export default function ResumablePlayer({ embedUrl, videoId, initialTime = 0, ti
         allow="accelerometer; gyroscope; encrypted-media; picture-in-picture; fullscreen"
         allowFullScreen
       />
+      {watermark && watermarkLabel ? (
+        <div className="watermark-overlay" aria-hidden="true">
+          <span>{watermarkLabel}</span>
+        </div>
+      ) : null}
     </div>
   );
 }

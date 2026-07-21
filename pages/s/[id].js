@@ -5,6 +5,7 @@ import { normalizeEmail } from '../../lib/auth';
 import { redis, k } from '../../lib/redis';
 import { getVideo, signedEmbedUrl } from '../../lib/bunny';
 import { isShareActive } from '../../lib/share';
+import { resolveWatermark, isExempt, getVideoMode, getGlobalDefault } from '../../lib/watermark';
 
 export async function getServerSideProps({ req, res, params }) {
   const id = String(params.id || '');
@@ -61,6 +62,18 @@ export async function getServerSideProps({ req, res, params }) {
     title = (await getVideo(share.videoId))?.title || title;
   } catch {}
 
+  // Best-effort — a watermark hiccup must never block playback (see
+  // lib/watermark.js: this is a deterrence accessory, not access control).
+  let watermark = false;
+  try {
+    const [exempt, videoMode, globalDefault] = await Promise.all([
+      isExempt(email),
+      getVideoMode(share.videoId),
+      getGlobalDefault(),
+    ]);
+    watermark = resolveWatermark({ exempt, shareMode: share.watermark, videoMode, globalDefault });
+  } catch {}
+
   return {
     props: {
       state: 'ok',
@@ -70,11 +83,12 @@ export async function getServerSideProps({ req, res, params }) {
       videoId: share.videoId,
       expiresAt: share.expiresAt || null,
       shareId: id,
+      watermark,
     },
   };
 }
 
-export default function Share({ state, user, title, embedUrl, videoId, expiresAt, shareId }) {
+export default function Share({ state, user, title, embedUrl, videoId, expiresAt, shareId, watermark }) {
   if (state === 'gone') {
     return (
       <ShareShell user={user}>
@@ -101,7 +115,14 @@ export default function Share({ state, user, title, embedUrl, videoId, expiresAt
   return (
     <ShareShell user={user}>
       <h1 className="watch-title">{title}</h1>
-      <ResumablePlayer embedUrl={embedUrl} videoId={videoId} title={title} shareId={shareId} />
+      <ResumablePlayer
+        embedUrl={embedUrl}
+        videoId={videoId}
+        title={title}
+        shareId={shareId}
+        watermark={watermark}
+        watermarkLabel={user.email}
+      />
       {expiresAt ? (
         <p className="muted share-expiry">
           This link expires {new Date(expiresAt).toLocaleString()}.

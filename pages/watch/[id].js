@@ -6,6 +6,7 @@ import { auth0 } from '../../lib/auth0';
 import { isAdmin, normalizeEmail } from '../../lib/auth';
 import { redis, k } from '../../lib/redis';
 import { getVideo, signedEmbedUrl } from '../../lib/bunny';
+import { resolveWatermark, isExempt, getVideoMode, getGlobalDefault } from '../../lib/watermark';
 
 export async function getServerSideProps({ req, res, params }) {
   const id = String(params.id || '');
@@ -53,6 +54,19 @@ export async function getServerSideProps({ req, res, params }) {
     .hset(k('viewer:lastseen'), { [email]: new Date().toISOString() })
     .catch(() => {});
 
+  // Best-effort — a watermark hiccup must never block playback (see
+  // lib/watermark.js). No share record on a regular watch page, so only the
+  // video's own setting and the global default can apply.
+  let watermark = false;
+  try {
+    const [exempt, videoMode, globalDefault] = await Promise.all([
+      isExempt(email),
+      getVideoMode(video.guid),
+      getGlobalDefault(),
+    ]);
+    watermark = resolveWatermark({ exempt, videoMode, globalDefault });
+  } catch {}
+
   return {
     props: {
       user: { email, name: session.user.name || email },
@@ -61,11 +75,12 @@ export async function getServerSideProps({ req, res, params }) {
       // Signed fresh on every request — never a permanent URL.
       embedUrl: signedEmbedUrl(video.guid),
       initialTime,
+      watermark,
     },
   };
 }
 
-export default function Watch({ user, isAdmin: admin, video, embedUrl, initialTime }) {
+export default function Watch({ user, isAdmin: admin, video, embedUrl, initialTime, watermark }) {
   return (
     <AppShell user={user} isAdmin={admin} approved wide>
       <Link href="/" className="back-link">
@@ -77,6 +92,8 @@ export default function Watch({ user, isAdmin: admin, video, embedUrl, initialTi
         videoId={video.guid}
         initialTime={initialTime}
         title={video.title}
+        watermark={watermark}
+        watermarkLabel={user.email}
       />
     </AppShell>
   );
