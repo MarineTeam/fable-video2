@@ -1,11 +1,10 @@
 import { requireAdmin } from '../../../lib/guard';
 import { allowRequest } from '../../../lib/ratelimit';
-import { redis, k } from '../../../lib/redis';
 import { normalizeEmail, isValidEmail } from '../../../lib/auth';
 import { getVideo } from '../../../lib/bunny';
-import { mailEnabled, sendShareEmail } from '../../../lib/mail';
 import { logAction } from '../../../lib/audit';
-import { createShare, clampHours, baseUrl } from '../../../lib/share';
+import { createShare, clampHours, baseUrl, resendShareEmail } from '../../../lib/share';
+import { extendShareAndBundle, afterShareCreated } from '../../../lib/bundle';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -14,25 +13,24 @@ export default async function handler(req, res) {
   if (!(await allowRequest('share', admin, 10, 60))) {
     return res.status(429).json({ error: 'Too many requests' });
   }
-  const r = redis();
 
-  // Re-deliver an existing link to its original recipient.
+  // Re-deliver an existing link's own email to its original recipient.
   if (req.body?.resend) {
     const id = String(req.body.resend);
-    const share = await r.get(k(`share:${id}`)).catch(() => null);
-    if (!share) return res.status(404).json({ error: 'Link expired or does not exist' });
-    let videoTitle = '';
-    try {
-      videoTitle = (await getVideo(share.videoId))?.title || '';
-    } catch {}
-    const result = await sendShareEmail({
-      to: share.email,
-      url: `${baseUrl(req)}/s/${id}`,
-      videoTitle,
-      expiresAt: share.expiresAt,
-    });
-    await logAction(admin, 'share.resend', `${share.email} (${id.slice(0, 8)}…)`);
+    const result = await resendShareEmail(id, baseUrl(req));
+    if (result.error) return res.status(404).json({ error: result.error });
+    await logAction(admin, 'share.resend', id.slice(0, 8) + '…');
     return res.json({ emailed: Boolean(result.ok) });
+  }
+
+  // Extend expiry in place — same token/URL, no new link. From now, not from
+  // the stale old expiry; refused outright on a revoked item.
+  if (req.body?.extend) {
+    const id = String(req.body.extend);
+    const result = await extendShareAndBundle(id, req.body.hours);
+    if (!result.ok) return res.status(409).json({ error: result.error });
+    await logAction(admin, 'share.extend', id.slice(0, 8) + '…');
+    return res.json({ ok: true, expiresAt: result.expiresAt });
   }
 
   // Create a new link.
@@ -52,21 +50,20 @@ export default async function handler(req, res) {
   }
   await logAction(admin, 'share.create', `${recipient} · video ${videoId} · ${ttlHours}h`);
 
-  const url = `${baseUrl(req)}/s/${id}`;
-  let emailed = false;
-  if (sendEmail && mailEnabled()) {
-    let videoTitle = '';
-    try {
-      videoTitle = (await getVideo(videoId))?.title || '';
-    } catch {}
-    // Best-effort: a mail failure never blocks link creation.
-    const result = await sendShareEmail({
-      to: recipient,
-      url,
-      videoTitle,
-      expiresAt: share.expiresAt,
-    });
-    emailed = Boolean(result.ok);
-  }
-  res.json({ id, url, expiresAt: share.expiresAt, emailed });
+  const origin = baseUrl(req);
+  const url = `${origin}/s/${id}`;
+  let videoTitle = '';
+  try {
+    videoTitle = (await getVideo(videoId))?.title || '';
+  } catch {}
+
+  // Best-effort: a mail failure never blocks link creation.
+  const { emailed, bundleId } = await afterShareCreated({
+    email: recipient,
+    newItems: [{ id, url, videoTitle, expiresAt: share.expiresAt }],
+    sendEmail: Boolean(sendEmail),
+    origin,
+  });
+
+  res.json({ id, url, expiresAt: share.expiresAt, emailed, bundleId });
 }

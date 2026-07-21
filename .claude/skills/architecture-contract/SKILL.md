@@ -95,7 +95,9 @@ more (simplicity, key custody, availability).
   before any UI is sent**: `pages/index.js:10-12` (redirect to login),
   `pages/admin.js:19-27` (redirect non-admins to `/`),
   `pages/watch/[id].js:14-31` (login redirect + viewer check),
-  `pages/s/[id].js:14-33` (login redirect + recipient match).
+  `pages/s/[id].js` (login redirect + recipient match + active-share check),
+  `pages/b/[id].js` (same pattern, one level up: recipient match against a
+  bundle's `email` field — **new 2026-07-21**).
 - WHY: with server-side rendering the unauthorized case never receives the
   page bundle or props — there is no client-side flash of protected content
   and no "hidden but present" admin UI. This is deliberately boring Next.js
@@ -145,19 +147,23 @@ actually breaks.
 | # | Invariant | Enforcement (verified 2026-07-18) | If violated |
 |---|---|---|---|
 | I1 | Every email comparison goes through `normalizeEmail` | `lib/auth.js:5-7`; used at every check site: `lib/guard.js:7`, `lib/auth.js:12,17`, `pages/index.js:14`, `pages/watch/[id].js:20`, `pages/admin.js:24`, `pages/s/[id].js:20,31`, `pages/api/admin/viewers.js:36,58`, `pages/api/admin/share.js:52`, `lib/push.js:23-25,54` | Case/whitespace variants of one email become distinct identities: viewers stored as `Bob@X` never match session `bob@x`; share links unusable by their own recipient |
-| I2 | Every `/api/admin/*` route calls `requireAdmin` first and returns on null | All 11 routes: analytics.js:9, audit.js:6, broadcast.js:7, collections.js:6, order.js:7, settings.js:8, share.js:21, shares.js:7, upload.js:11, videos.js:14, viewers.js:7 (each followed by `if (!admin) return`) | Any signed-in (or with a broken session check, anonymous) user can upload, delete videos, mint share links, edit the viewer list |
-| I3 | Every viewer-data API calls `requireViewer` (or an explicit documented weaker guard) | `/api/videos` → videos.js:11; `/api/collections` → collections.js:6; `/api/progress` → progress.js:8; `/api/push/subscribe` → subscribe.js:8. Deliberate exceptions: `/api/theme` GET is public (theme.js:6-17 — colors only, POST is requireAdmin at theme.js:20); `/api/push/unsubscribe` needs only a session (unsubscribe.js:8-9 — a de-listed viewer must still be able to silence their device) | Unapproved accounts enumerate the library, read/write watch history, register push devices |
+| I2 | Every `/api/admin/*` route calls `requireAdmin` first and returns on null | All 13 routes (updated 2026-07-21, was 11): analytics.js:9, audit.js:6, broadcast.js:7, bulk-share.js:19, collections.js:6, order.js:7, settings.js:8, share.js:11, shares.js:8, shares-bulk.js:14, upload.js:11, videos.js:14, viewers.js:7 (each followed by `if (!admin) return`) | Any signed-in (or with a broken session check, anonymous) user can upload, delete videos, mint/resend/extend/revoke share links, edit the viewer list |
+| I3 | Every viewer-data API calls `requireViewer` (or an explicit documented weaker guard) | `/api/videos` → videos.js:11; `/api/collections` → collections.js:6; `/api/progress` → progress.js:8; `/api/push/subscribe` → subscribe.js:8. Deliberate exceptions: `/api/theme` GET is public (theme.js:6-17 — colors only, POST is requireAdmin at theme.js:20); `/api/push/unsubscribe` needs only a session (unsubscribe.js:8-9 — a de-listed viewer must still be able to silence their device); `/api/share-event` needs only a session, then does its own email-match check against the share record (share-event.js:10-36) — the same non-`requireViewer` pattern as `pages/s/[id].js` and `pages/b/[id].js` themselves, since recipients aren't necessarily approved viewers | Unapproved accounts enumerate the library, read/write watch history, register push devices |
 | I4 | `BUNNY_API_KEY` is read server-side only, in one place | `lib/bunny.js:11` is the sole reference in the repo; only the derived TUS signature reaches the browser (`pages/api/admin/upload.js:23-25`) | Full read/write control of the Bunny library leaks to any page viewer |
 | I5 | Embed URLs are generated per request and never persisted | Only two call sites, both inside `getServerSideProps`: `pages/watch/[id].js:62`, `pages/s/[id].js:56`; nothing writes an embed URL to Redis or returns one from an API list endpoint (`/api/videos` returns guid/title/length/thumbnail only, videos.js:35-41) | A stored URL becomes an unrevocable bearer credential outliving viewer removal |
 | I6 | All Redis access goes through `redis()` and all keys through `k()` | `new Redis` exists only in `lib/redis.js:10`; no literal `fable2:`/`pvp:` key string exists outside `lib/redis.js` (the two remaining `pvp` strings are client-side names, not Redis keys: `lib/theme.js:20`, `public/sw.js:4`) | Split-brain state across prefixes; a second client with different env fallbacks silently targets another database |
-| I7 | Share-mismatch responses never reveal the intended recipient | `pages/s/[id].js:31-33` returns only `state: 'mismatch'`; the rendered copy (`pages/s/[id].js:99-110`) names no address | A share link becomes an oracle for harvesting who was invited to what |
+| I7 | Share-mismatch responses never reveal the intended recipient | `pages/s/[id].js` returns only `state: 'mismatch'`, no address in the rendered copy; `pages/b/[id].js` follows the identical pattern for bundles. A dead link — revoked, expired, or never existed — always renders the same "gone" state too, so it never leaks *which* kind of dead it is (`lib/share.js` `isShareActive`) | A share link or bundle page becomes an oracle for harvesting who was invited to what, or whether a specific link was revoked vs merely expired |
 | I8 | The service worker caches only the 5 public static assets — never authed pages, API responses, or video | `public/sw.js:5-11` (allowlist) and `public/sw.js:31-38` (fetch handler responds only for allowlisted same-origin paths; everything else goes to network) | Protected content persists in cache storage on shared machines after logout; stale API data served offline |
 | I9 | Guards fail CLOSED; the rate limiter fails OPEN — never swap these | Closed: `lib/guard.js:32-34`; open: `lib/ratelimit.js:27-29` | Swapped one way: Redis outage grants access to everyone. Swapped the other: Redis outage takes the whole portal down |
-| I10 | Share IDs are unguessable and expire server-side | `pages/api/admin/share.js:56` (18 random bytes, base64url ≈ 144 bits) and share.js:65 (`EX ttlHours*3600`, clamped 1–720h at share.js:54) | Guessable/eternal links defeat recipient-locking |
+| I10 | Share IDs are unguessable and expire server-side | `lib/share.js` `createShare` (18 random bytes, base64url ≈ 144 bits), clamped 1–720h. **Updated 2026-07-21**: expiry is now decided by the stored `expiresAt` field, not by Redis TTL absence — the Redis record deliberately outlives `expiresAt` by a 60-day grace window (`GRACE_SECONDS`) so an expired-but-not-revoked link can still be **extended**. Every read path (`isShareActive`, used by `pages/s/[id].js`, `pages/api/share-event.js`, `pages/b/[id].js`) checks `expiresAt`/`revokedAt` explicitly instead of treating "record exists" as "usable" | Guessable/eternal links defeat recipient-locking; if a read path skipped the explicit check it would serve an already-expired link during its grace window |
+| I11 | Revoke is a soft-delete; extend is refused on a revoked item | `lib/share.js` `revokeShare` sets `revokedAt` (no `DEL`); `extendShare` returns an error if `share.revokedAt` is set, before touching `expiresAt` | Without this, "extend" could double as a silent un-revoke, or a revoked link would vanish from the admin list instead of staying auditable |
 
-Rate-limited endpoints (for completeness; all via `allowRequest`):
-`/api/videos` 60/min per email (videos.js:13), `/api/admin/upload` 20/hour
-(upload.js:13), `/api/admin/share` 10/min (share.js:23).
+Rate-limited endpoints (for completeness; all via `allowRequest`, updated
+2026-07-21): `/api/videos` 60/min per email (videos.js:13), `/api/admin/upload`
+20/hour (upload.js:13), `/api/admin/share` 10/min — covers create/resend/extend
+(share.js:13), `/api/admin/bulk-share` 5/min (bulk-share.js:21),
+`/api/admin/shares-bulk` 10/min — covers bulk resend/revoke/extend
+(shares-bulk.js:16), `/api/share-event` 60/min per email (share-event.js:14).
 
 When adding **any new API route or page**: pick the guard first (I2/I3), keep
 it as the first statement, and add the route to the mapping above. The
@@ -182,8 +188,10 @@ still defensively handle string values.
 | `order` | string (JSON array) | array of video guids | SET admin/order.js:19; pruned on video delete admin/videos.js:66-72 | api/videos.js:24; admin/videos.js:24 | none; capped 500 entries at write (order.js:11-15) |
 | `theme` | string (JSON object) | `{name, colors:{bg,panel,text,muted,accent,accent2}}` | SET api/theme.js:26 (validated, theme.js:25-39) | api/theme.js:11 (public GET) | none |
 | `audit` | LIST | JSON `{actor, action, detail≤300, at}` | LPUSH+LTRIM audit.js:16-17 | LRANGE audit.js:25 (via admin/audit.js, top 100) | LTRIM-capped at 200 entries; best-effort writes |
-| `share:<id>` | string (JSON object) | `{videoId, email, createdAt, expiresAt[, viewedAt]}` | SET EX admin/share.js:65; rewritten preserving TTL on first view s/[id].js:36-44; DEL admin/shares.js:52 | s/[id].js:26; admin/shares.js:17; admin/share.js:31 (resend) | `EX` = ttlHours×3600, default 72h, clamped 1–720h (share.js:10-11,54) |
-| `shares` | SET | share ids (index over `share:<id>`) | SADD share.js:66; SREM shares.js:20 (self-prune), shares.js:53 (revoke) | SMEMBERS shares.js:13 | none — see weak point 4.7 |
+| `share:<id>` | string (JSON object) | `{videoId, email, createdAt, expiresAt, views?, viewedAt?, lastViewedAt?, plays?, furthestPercent?, completedAt?, revokedAt?, bundleId?}` (**updated 2026-07-21**: added `revokedAt`, `bundleId`; `viewedAt` no longer the sole view marker) | SET EX `lib/share.js` `createShare`; rewritten preserving TTL on every view `pages/s/[id].js` (views/lastViewedAt), on playback events `pages/api/share-event.js` (plays/furthestPercent/completedAt), on revoke `lib/share.js` `revokeShare` (soft-delete, sets `revokedAt`, no longer `DEL`), on extend `lib/share.js` `extendShare` (new `expiresAt`), on bundling `lib/bundle.js` `tagShareBundle` (`bundleId`) | `pages/s/[id].js`; `pages/api/admin/shares.js` (list, with computed `status`); `pages/api/admin/share.js` (resend/extend); `pages/api/share-event.js`; `lib/bundle.js` (`activeSharesForEmail`, `liveBundleItems`) | `EX` = `ttlSecondsFor(expiresAt)` = seconds-until-`expiresAt` **plus a 60-day grace window** (`lib/share.js` `GRACE_SECONDS`) — **not** simply `ttlHours×3600` as before 2026-07-21. Access control is decided by comparing the `expiresAt` field to now (`isShareActive`), not by whether the Redis record still exists — the grace window exists solely so an expired-but-not-revoked link can still be **extended**. `hours` still clamped 1–720h at creation/extension |
+| `shares` | SET | share ids (index over `share:<id>`) | SADD `lib/share.js` `createShare`; SREM `pages/api/admin/shares.js` (self-prune, only once the record is truly gone past its grace window — **no longer** on ordinary revoke, since revoke is now a soft-delete that keeps the id indexed) | SMEMBERS `pages/api/admin/shares.js`; `lib/bundle.js` `activeSharesForEmail` (full scan, filtered by email + `isShareActive`) | none — see weak point 4.7 |
+| `bundle:<id>` | string (JSON object) | `{email, createdAt, expiresAt, itemIds: [shareId, ...]}` — pure grouping list; no item title/status is ever cached here (**new 2026-07-21**) | SET EX `lib/bundle.js` `createOrExtendBundle`, `extendBundleExpiry` | `pages/b/[id].js`; `lib/bundle.js` `findActiveBundle`, `liveBundleItems` | `EX` = `ttlSecondsFor(expiresAt)`; `expiresAt` only ever moves forward (never shortened by one member's shorter extend) |
+| `bundle-by-email:<email>` | string | bundle id | SET `lib/bundle.js` `createOrExtendBundle`, `extendBundleExpiry` (**new 2026-07-21**) | GET `lib/bundle.js` `findActiveBundle` — the "one bundle per recipient" lookup | same TTL as its `bundle:<id>` |
 | `progress:<email>` | HASH | videoId → JSON `{seconds, duration, title≤200, updatedAt}` | HSET api/progress.js:42-49 | HGETALL progress.js:15; HGET watch/[id].js:45 | none; GET response sliced to newest 30 (progress.js:4,24) but the hash itself is unbounded (bounded in practice by library size) |
 | `push:subs` | HASH | endpoint → JSON `{sub, email, addedAt}` | HSET push/subscribe.js:21-23; HDEL push/unsubscribe.js:16 and push.js:86 (auto-prune on 404/410) | HGETALL push.js:60 | none |
 | `push:announced` | SET | video guids already announced | SADD push.js:102 (its return value IS the once-only guard) | (SADD return only) | none; grows one guid per announced video |
@@ -228,10 +236,17 @@ do not describe any of them as mitigated-in-code.
    passes `search`/`collection` to Bunny (`lib/bunny.js:32-41`) but only page 1
    is ever requested (videos.js:30), so results are whatever Bunny ranks into
    the first ≤100 items.
-7. **The `shares` SET self-prunes only on admin reads.** Expired `share:<id>`
-   values vanish via `EX`, but their ids stay in the index until an admin
-   opens the Shares tab (`pages/api/admin/shares.js:18-21`). Between reads the
-   index over-counts; harmless but surprising.
+7. **The `shares` SET self-prunes only on admin reads, and only much later than
+   before.** Updated 2026-07-21: `share:<id>` records now deliberately survive
+   ~60 days past their logical `expiresAt` (the extend grace window — see §3),
+   so an id stays in the index, visibly "Expired" in the admin Shares list,
+   for that whole window rather than vanishing at TTL. The SREM self-prune in
+   `pages/api/admin/shares.js` now only fires once the record is truly gone
+   (grace expired) — a revoke no longer removes the id either, since revoke is
+   a soft-delete (`revokedAt`) that keeps the record (and its id) around so it
+   stays auditable and distinguishable from "merely expired". Between reads
+   the index can still over-count relative to what's expired-and-gone;
+   harmless but surprising.
 8. **Idle timeout is client-side only.** 30-minute inactivity logout runs in
    the browser (`components/IdleTimeout.js:3,12-14`, mounted in
    `pages/_app.js:34`); meanwhile middleware rolls the session cookie on every

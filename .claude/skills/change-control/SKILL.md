@@ -178,7 +178,10 @@ A change is **security-touching** if it modifies any of:
 - any file under `pages/api/admin/`
 - the signing functions in `lib/bunny.js` (`signedEmbedUrl`, `thumbnailUrl`,
   `tusAuth`)
-- the share-link flow (`pages/api/admin/share.js`, `pages/s/`)
+- the share-link/bundle flow (`lib/share.js`, `lib/bundle.js`,
+  `pages/api/admin/share.js`, `pages/api/admin/shares.js`,
+  `pages/api/admin/shares-bulk.js`, `pages/api/admin/bulk-share.js`,
+  `pages/api/share-event.js`, `pages/s/`, `pages/b/`) — **updated 2026-07-21**
 
 Before merging a security-touching change, in addition to green CI:
 

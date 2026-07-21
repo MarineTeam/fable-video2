@@ -800,6 +800,25 @@ code {
   color: var(--muted);
 }
 
+/* ---- Bundle page ---- */
+
+.bundle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+}
+
+.bundle-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
 /* ---- Settings ---- */
 
 .palette-grid {

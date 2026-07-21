@@ -855,6 +855,24 @@ function ViewersTab({ viewers, reload }) {
 function SharesTab({ shares, reload, mailOn }) {
   const [copiedId, setCopiedId] = useState('');
   const [status, setStatus] = useState('');
+  const [selected, setSelected] = useState(new Set());
+  const [bulkHours, setBulkHours] = useState(72);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState(null);
+
+  function toggleSelect(id) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function clearSelect() {
+    setSelected(new Set());
+    setBulkResult(null);
+  }
 
   async function copy(id) {
     try {
@@ -882,22 +900,153 @@ function SharesTab({ shares, reload, mailOn }) {
     } catch {}
   }
 
+  async function extend(id) {
+    const input = window.prompt('Extend expiry by how many hours (from now)?', '72');
+    if (input === null) return;
+    const hours = Number(input);
+    if (!Number.isFinite(hours) || hours <= 0) return;
+    setStatus('');
+    try {
+      const data = await api('/api/admin/share', { method: 'POST', body: { extend: id, hours } });
+      setStatus(`Extended to ${fmtWhen(data.expiresAt)}.`);
+      reload();
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
+  // Every id is processed independently server-side — one bad/revoked item
+  // never aborts the rest of the batch, and the per-id outcome is reported.
+  async function runBulk(action) {
+    setBulkBusy(true);
+    setBulkResult(null);
+    try {
+      const data = await api('/api/admin/shares-bulk', {
+        method: 'POST',
+        body: {
+          action,
+          ids: [...selected],
+          hours: action === 'extend' ? Number(bulkHours) : undefined,
+        },
+      });
+      setBulkResult(data.results);
+      reload();
+    } catch (err) {
+      setStatus(err.message);
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   return (
     <div className="tab-body">
       {status ? <p className="muted">{status}</p> : null}
+
+      {shares.length > 0 ? (
+        <p className="row-meta muted">
+          <button
+            type="button"
+            className="linklike"
+            onClick={() => setSelected(new Set(shares.map((s) => s.id)))}
+          >
+            Select all
+          </button>
+          {selected.size > 0 ? (
+            <>
+              {' · '}
+              <button type="button" className="linklike" onClick={clearSelect}>
+                Clear
+              </button>
+            </>
+          ) : null}
+        </p>
+      ) : null}
+
+      {selected.size > 0 ? (
+        <div className="bulk-toolbar card card-pad">
+          <span>{selected.size} selected</span>
+          {mailOn ? (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              disabled={bulkBusy}
+              onClick={() => runBulk('resend')}
+            >
+              <MailIcon /> Resend {selected.size}
+            </button>
+          ) : null}
+          <label className="field-inline">
+            <input
+              className="input input-narrow"
+              type="number"
+              min={1}
+              max={720}
+              value={bulkHours}
+              onChange={(e) => setBulkHours(e.target.value)}
+            />
+            hours
+          </label>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            disabled={bulkBusy}
+            onClick={() => runBulk('extend')}
+          >
+            Extend {selected.size}
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm danger"
+            disabled={bulkBusy}
+            onClick={() => runBulk('revoke')}
+          >
+            <XIcon /> Revoke {selected.size}
+          </button>
+        </div>
+      ) : null}
+      {bulkResult ? (
+        <ul className="bulk-share-result">
+          {bulkResult.map((r) => (
+            <li key={r.id}>
+              {r.id.slice(0, 8)}…: {r.ok ? 'done' : r.error || 'failed'}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
       <div className="admin-rows">
         {shares.map((s) => (
           <div key={s.id} className="admin-row card">
+            <input
+              type="checkbox"
+              checked={selected.has(s.id)}
+              onChange={() => toggleSelect(s.id)}
+              aria-label={`Select share for ${s.email}`}
+            />
             <div className="row-main">
               <span className="row-title">{s.videoTitle || s.videoId}</span>
               <span className="row-meta muted">
                 For {s.email} · created {fmtWhen(s.createdAt)} · expires {fmtWhen(s.expiresAt)}
-                {s.viewedAt ? ` · ${s.views || 1} view${(s.views || 1) === 1 ? '' : 's'}, last ${fmtWhen(s.lastViewedAt || s.viewedAt)}` : ''}
+                {s.viewedAt
+                  ? ` · ${s.views || 1} view${(s.views || 1) === 1 ? '' : 's'}, last ${fmtWhen(s.lastViewedAt || s.viewedAt)}`
+                  : ''}
                 {s.plays ? ` · played ${s.plays}×` : ''}
                 {typeof s.furthestPercent === 'number' ? ` · watched ${s.furthestPercent}%` : ''}
+                {s.bundleId ? (
+                  <>
+                    {' · '}
+                    <a href={`/b/${s.bundleId}`} target="_blank" rel="noreferrer">
+                      part of a bundle
+                    </a>
+                  </>
+                ) : null}
               </span>
             </div>
-            {s.completedAt ? (
+            {s.status === 'revoked' ? (
+              <span className="badge badge-err">Revoked</span>
+            ) : s.status === 'expired' ? (
+              <span className="badge badge-warn">Expired</span>
+            ) : s.completedAt ? (
               <span className="badge badge-ok" title={`Completed ${fmtWhen(s.completedAt)}`}>
                 Completed
               </span>
@@ -912,18 +1061,25 @@ function SharesTab({ shares, reload, mailOn }) {
               {copiedId === s.id ? <CheckIcon /> : <CopyIcon />}
               {copiedId === s.id ? 'Copied' : 'Copy'}
             </button>
-            {mailOn ? (
+            {mailOn && s.status !== 'revoked' ? (
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => resend(s.id)}>
                 <MailIcon /> Resend email
               </button>
             ) : null}
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm danger"
-              onClick={() => revoke(s.id)}
-            >
-              <XIcon /> Revoke
-            </button>
+            {s.status !== 'revoked' ? (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => extend(s.id)}>
+                Extend
+              </button>
+            ) : null}
+            {s.status !== 'revoked' ? (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm danger"
+                onClick={() => revoke(s.id)}
+              >
+                <XIcon /> Revoke
+              </button>
+            ) : null}
           </div>
         ))}
         {shares.length === 0 ? <p className="empty">No active share links.</p> : null}

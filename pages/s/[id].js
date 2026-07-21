@@ -1,9 +1,10 @@
 import ResumablePlayer from '../../components/ResumablePlayer';
-import { LogoIcon } from '../../components/icons';
+import ShareShell from '../../components/ShareShell';
 import { auth0 } from '../../lib/auth0';
 import { normalizeEmail } from '../../lib/auth';
 import { redis, k } from '../../lib/redis';
 import { getVideo, signedEmbedUrl } from '../../lib/bunny';
+import { isShareActive } from '../../lib/share';
 
 export async function getServerSideProps({ req, res, params }) {
   const id = String(params.id || '');
@@ -25,7 +26,11 @@ export async function getServerSideProps({ req, res, params }) {
   try {
     share = await redis().get(key);
   } catch {}
-  if (!share) return { props: { state: 'gone', user } };
+  // Revoked or past its logical expiry — treated as gone even though the
+  // record may still physically exist during its post-expiry grace window
+  // (see lib/share.js GRACE_SECONDS). Checked before the recipient match so
+  // a dead link never leaks anything about who it was for either way.
+  if (!isShareActive(share)) return { props: { state: 'gone', user } };
 
   // Generic mismatch message — never reveals who the link was for.
   if (normalizeEmail(share.email) !== email) {
@@ -67,31 +72,6 @@ export async function getServerSideProps({ req, res, params }) {
       shareId: id,
     },
   };
-}
-
-// Minimal shell: recipients aren't necessarily approved viewers, so no
-// library navigation here.
-function ShareShell({ user, children }) {
-  return (
-    <div className="shell">
-      <header className="topbar">
-        <span className="brand">
-          <LogoIcon />
-          <span>Marine Video Portal</span>
-        </span>
-        <div className="topbar-actions">
-          {user ? <span className="user-email">{user.email}</span> : null}
-          {user ? (
-            <a href="/auth/logout" className="btn btn-ghost btn-sm">
-              Sign out
-            </a>
-          ) : null}
-        </div>
-      </header>
-      <main className="main wide">{children}</main>
-      <footer className="footer">Private share — this link is tied to your email address.</footer>
-    </div>
-  );
 }
 
 export default function Share({ state, user, title, embedUrl, videoId, expiresAt, shareId }) {

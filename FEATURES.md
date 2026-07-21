@@ -9,7 +9,7 @@ Current as of **v2.0.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - **Server-side admin gate** — `/admin` checks the session + admin email in `getServerSideProps` and redirects non-admins before any admin UI is sent; every `/api/admin/*` route also independently returns `403`.
 - Centralized identity logic in one shared helper (`lib/auth.js`), with API-route guards in `lib/guard.js`.
 - **Auto sign-out after 30 minutes of inactivity** (protects a portal left open on a shared machine).
-- **API rate limiting** (sliding window) on the video list, upload, and share-creation endpoints; fails open so an infrastructure hiccup never blocks real users.
+- **API rate limiting** (sliding window) on the video list, upload, share-creation, bulk-share, bulk share actions (resend/extend/revoke), and share playback-event endpoints; fails open so an infrastructure hiccup never blocks real users.
 - Auth0 sign-ups can be disabled tenant-wide so strangers can't self-register. (Access is by email identity, so this is the primary guard against self-registering as an approved/admin address.)
 
 ## Homepage & viewer experience
@@ -43,18 +43,20 @@ Current as of **v2.0.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - **Forced login** — opening the link requires an Auth0 login and only plays if the logged-in email matches the one specified.
 - Wrong-account attempts show a generic mismatch message — **the intended recipient's email is never revealed**.
 - **Adjustable expiry** per link (default 72 hours, capped at 720 / 30 days).
-- **Email delivery** _(opt-in)_ — a checkbox on the share form emails the link straight to the recipient via [Resend](https://resend.com), so the admin no longer has to copy-and-send by hand. Best-effort: a mail failure never blocks link creation.
-- **Resend** — each active link has a "Resend email" button that re-delivers it to the original recipient (rate-limited, like link creation).
+- **Bulk share** _(admin)_ — multi-select any number of videos in the Videos tab and share all of them with several recipients in one action; every recipient × video pair gets its own independently-revocable link (capped at 50 videos, 50 recipients, 300 total links per action).
+- **Email delivery** _(opt-in)_ — a checkbox emails the link(s) straight to each recipient via [Resend](https://resend.com), so the admin no longer has to copy-and-send by hand. Best-effort: a mail failure never blocks link creation.
+- **Bundles: one place per recipient, not one email per action** — once a recipient has 2+ currently-active shares (from any single-share or bulk-share action, in any order), they automatically get one consolidated **bundle page** (`/b/[id]`) listing everything shared with them, and every later notification becomes one updated email pointing at that page instead of a new standalone email. Their first-ever share still gets a plain single-link email. Signing in once (the same Auth0 login every share already requires) unlocks the bundle page and every individual link addressed to that email — there's no separate re-verification step. The bundle page is a pure grouping list of ids; each item's title, expiry, and status is always read live from its own share record, so revoking or expiring one item is reflected instantly.
+- **Resend** — re-deliver a link's own email to its original recipient (rate-limited, like link creation). Available singly per link or as a **bulk action** across a multi-selected set of links, with per-link success/failure reported so one bad link never blocks the rest of the batch.
+- **Extend** — push a link's expiry forward from now (not from its old, possibly-already-passed expiry) without creating a new link or URL — the symmetric counterpart to revoke. Works on an already-expired-but-not-revoked link (the realistic "it lapsed, give me a few more days" case); refuses outright on a revoked link, so extend can never act as a silent un-revoke. If the link belongs to a bundle, extending it also pushes the bundle's own expiry forward so the bundle page doesn't lapse before that link does. Available singly or as a **bulk action** (one hours value applied across the selection, per-link success/failure reported).
+- **Instant revocation** — kill any active link immediately, one click, or as a **bulk action** across a multi-selected set. Revoking is a soft-delete (the link is marked revoked, not deleted outright), so a revoked link stays visible with a "Revoked" status instead of silently disappearing, and can never be extended back to life.
 - **Inert until configured** — the email checkbox and Resend button stay hidden unless `RESEND_API_KEY` is set; without it, sharing works exactly as before (copy the link manually).
-- **Viewed status** — each active link shows whether the recipient has opened it yet (stamped on first play, preserving remaining TTL).
-- **Active link visibility** — every live link with recipient and exact expiry.
-- **Instant revocation** — kill any active link immediately, one click.
-- Expired/revoked links show a clean "expired or doesn't exist" message.
+- **Per-link status** — Active / Expired / Revoked, view count + last-viewed time (every visit counts, not just the first), and real playback signal reported by the player itself: play count, furthest-watched %, and a "Completed" badge — not just whether the page was opened.
+- Expired/revoked links show the same clean "expired or doesn't exist" message either way, so a dead link never reveals which kind of dead it is.
 
 ## People & oversight _(admin)_
 - **Approved viewer management** — add/remove emails, with **bulk add** (paste comma/space/newline-separated lists; validated + deduped).
 - **Viewer last-seen** — each viewer's most recent activity time.
-- **Activity / audit log** — the most recent admin actions (viewer add/remove, share create/revoke, video rename/delete, collection create/delete, settings, palette), each with actor and time. Logging is best-effort so it never breaks the underlying action.
+- **Activity / audit log** — the most recent admin actions (viewer add/remove, share create/resend/extend/revoke including bulk actions, video rename/delete, collection create/delete, settings, palette), each with actor and time. Logging is best-effort so it never breaks the underlying action.
 - **Analytics dashboard** — total views, 30-day views, watch time, video count, a 30-day views bar chart, and a most-watched list (from bunny.net video stats + the statistics API).
 - **Content-protection panel** — explains the tokenized-playback model and the bunny.net "Block Direct URL File Access" setting.
 
@@ -78,7 +80,8 @@ Current as of **v2.0.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 
 ## Platform, quality & observability
 - Hosted on Vercel; dependencies install automatically during deploy (no local Node/npm required to ship).
-- Settings, viewers, order, share records, watch history, push subscriptions, the theme, and the audit log are stored in Upstash Redis (via Vercel Storage), editable live from `/admin` without redeploying. All keys are namespaced with a `pvp:` prefix.
+- Settings, viewers, order, share records, bundles, watch history, push subscriptions, the theme, and the audit log are stored in Upstash Redis (via Vercel Storage), editable live from `/admin` without redeploying. All keys are namespaced with a `fable2:` prefix.
+- Share expiry is a logical field (`expiresAt`), not raw Redis TTL — a link's own Redis record actually outlives its expiry by a 60-day grace window so an already-lapsed-but-not-revoked link can still be **extended**. All read paths (the share page, playback events, the bundle page) check `expiresAt`/`revokedAt` explicitly rather than relying on the record simply being gone.
 - **Opt-in Sentry error monitoring** — modern instrumentation-file setup (client/server/edge); inert until `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` are set.
 - **CI pipeline** — GitHub Actions runs lint + tests + build on every push/PR to `main`, catching breakage before Vercel deploys.
 - **Smoke tests** — Vitest coverage for the auth check, video-ordering logic, theme helpers, and push logic.

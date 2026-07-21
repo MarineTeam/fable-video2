@@ -2,16 +2,18 @@ import { requireAdmin } from '../../../lib/guard';
 import { allowRequest } from '../../../lib/ratelimit';
 import { normalizeEmail, isValidEmail } from '../../../lib/auth';
 import { getVideo } from '../../../lib/bunny';
-import { mailEnabled, sendBulkShareEmail } from '../../../lib/mail';
 import { logAction } from '../../../lib/audit';
 import { createShare, clampHours, baseUrl } from '../../../lib/share';
+import { afterShareCreated } from '../../../lib/bundle';
 
 const MAX_VIDEOS = 50;
 const MAX_EMAILS = 50;
 const MAX_PAIRS = 300; // videos x recipients per request
 
-// Select N videos x M recipients, get N*M independently-revocable links —
-// one email per recipient listing only the links addressed to them.
+// Select N videos x M recipients, get N*M independently-revocable links. Each
+// recipient gets one notification — a plain single-link email for a genuine
+// first share, or a consolidated bundle email once they have 2+ active
+// shares (see lib/bundle.js afterShareCreated).
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const admin = await requireAdmin(req, res);
@@ -80,23 +82,29 @@ export default async function handler(req, res) {
     `${recipients.length} recipients × ${uniqueVideoIds.length} videos = ${created} links · ${ttlHours}h`
   );
 
-  const emailed = {};
-  if (sendEmail && mailEnabled()) {
-    await Promise.all(
-      recipients.map(async (email) => {
-        const items = linksByRecipient.get(email);
-        const result = await sendBulkShareEmail({ to: email, items });
-        emailed[email] = Boolean(result.ok);
-      })
-    );
-  }
+  // Per recipient: decide plain-single vs bundle-consolidated notification,
+  // and update their bundle grouping regardless of whether we actually email
+  // them (the grouping is a data fact, independent of this action's choice).
+  const outcomes = {};
+  await Promise.all(
+    recipients.map(async (email) => {
+      const result = await afterShareCreated({
+        email,
+        newItems: linksByRecipient.get(email),
+        sendEmail: Boolean(sendEmail),
+        origin: url,
+      });
+      outcomes[email] = result;
+    })
+  );
 
   res.json({
     created,
     recipients: recipients.map((email) => ({
       email,
       links: linksByRecipient.get(email).length,
-      emailed: emailed[email] || false,
+      emailed: outcomes[email]?.emailed || false,
+      bundleId: outcomes[email]?.bundleId || null,
     })),
   });
 }

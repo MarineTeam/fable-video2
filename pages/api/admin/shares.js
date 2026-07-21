@@ -2,6 +2,7 @@ import { requireAdmin } from '../../../lib/guard';
 import { redis, k } from '../../../lib/redis';
 import { getVideo } from '../../../lib/bunny';
 import { logAction } from '../../../lib/audit';
+import { shareStatus, revokeShare } from '../../../lib/share';
 
 export default async function handler(req, res) {
   const admin = await requireAdmin(req, res);
@@ -16,11 +17,11 @@ export default async function handler(req, res) {
         ids.map(async (id) => {
           const share = await r.get(k(`share:${id}`)).catch(() => null);
           if (!share) {
-            // Expired or revoked — self-prune the index.
+            // Truly gone (past its grace window) — self-prune the index.
             await r.srem(k('shares'), id).catch(() => {});
             return;
           }
-          shares.push({ id, ...share });
+          shares.push({ id, ...share, status: shareStatus(share) });
         })
       );
       // Titles for display, fetched once per unique video.
@@ -49,8 +50,8 @@ export default async function handler(req, res) {
     const id = String(req.query.id || req.body?.id || '');
     if (!id) return res.status(400).json({ error: 'Bad id' });
     try {
-      await r.del(k(`share:${id}`));
-      await r.srem(k('shares'), id);
+      const result = await revokeShare(id);
+      if (!result.ok) return res.status(404).json({ error: result.error });
       await logAction(admin, 'share.revoke', id.slice(0, 8) + '…');
       return res.json({ ok: true });
     } catch {
