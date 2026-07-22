@@ -3,6 +3,31 @@
 All notable changes to the Marine Video Portal. Dates are UTC, matching the
 commit history (`git log --oneline`).
 
+## 2026-07-22 — Geo location whitelisting for viewers and admins
+
+- **Two independent, off-by-default geo whitelists** — `GEO_WHITELIST` for
+  viewers (gates the homepage, `/watch/[id]`, and share/bundle links) and a
+  separate `ADMIN_GEO_WHITELIST` for admins (gates `/admin` and every
+  `/api/admin/*` route). Both are Vercel env vars, shown **read-only** in the
+  admin Settings tab; only each whitelist's enforcement toggle is editable
+  there (stored in Redis, off by default). Kept as two separate env vars
+  specifically so a traveling admin is never blocked by the viewer
+  whitelist, and — if the admin whitelist itself ever locks an admin out —
+  it can still be fixed by editing `ADMIN_GEO_WHITELIST` directly in Vercel,
+  with no dependency on `/admin` being reachable.
+- Country is read from Vercel's edge-injected `x-vercel-ip-country` request
+  header — no external geo-IP service, no added dependency or latency.
+  `lib/geo.js` (`resolveGeoAccess`, `isGeoAllowed`).
+- **Fails open**, unlike a true access-control guard: a missing/undetermined
+  country or a Redis error while reading the enforcement toggle is
+  *allowed*, not denied — the same "inert until configured, never
+  half-breaks" contract as push/mail, so a geo-check hiccup never locks out
+  the whole portal.
+- Enforced in `lib/guard.js` (`requireAdmin`/`requireViewer`, covering all
+  `/api/admin/*` and viewer API routes) and in each page's own
+  `getServerSideProps` (`/`, `/watch/[id]`, `/admin`, `/s/[id]`, `/b/[id]`).
+  Blocked users see a "Not available in your region" notice.
+
 ## 2026-07-22 — Share un-revoke/permanent-delete, persistent bundle link, viewer activity
 
 - **Un-revoke** — undo an accidental revoke on a single share link: clears the
