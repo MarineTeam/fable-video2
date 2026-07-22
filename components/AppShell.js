@@ -11,6 +11,11 @@ export default function AppShell({ user, isAdmin, approved, wide, children }) {
           <span>Marine Video Portal</span>
         </Link>
         <div className="topbar-actions">
+          {approved ? (
+            <Link href="/activity" className="btn btn-ghost btn-sm">
+              {isAdmin ? 'Activity' : 'My Activity'}
+            </Link>
+          ) : null}
           {approved ? <NotifyButton /> : null}
           {isAdmin ? (
             <Link href="/admin" className="btn btn-ghost btn-sm">

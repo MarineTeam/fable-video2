@@ -1042,6 +1042,7 @@ function ViewersTab({ viewers, reload }) {
 
 function SharesTab({ shares, reload, mailOn }) {
   const [copiedId, setCopiedId] = useState('');
+  const [copiedBundleId, setCopiedBundleId] = useState('');
   const [status, setStatus] = useState('');
   const [selected, setSelected] = useState(new Set());
   const [bulkHours, setBulkHours] = useState(72);
@@ -1070,6 +1071,14 @@ function SharesTab({ shares, reload, mailOn }) {
     } catch {}
   }
 
+  async function copyBundle(bundleId) {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/b/${bundleId}`);
+      setCopiedBundleId(bundleId);
+      setTimeout(() => setCopiedBundleId(''), 1500);
+    } catch {}
+  }
+
   async function resend(id) {
     setStatus('');
     try {
@@ -1086,6 +1095,32 @@ function SharesTab({ shares, reload, mailOn }) {
       await api(`/api/admin/shares?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
       reload();
     } catch {}
+  }
+
+  async function unrevoke(id) {
+    setStatus('');
+    try {
+      await api('/api/admin/shares', { method: 'PUT', body: { id } });
+      setStatus('Link un-revoked.');
+      reload();
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
+  async function purge(id) {
+    if (
+      !window.confirm(
+        'Permanently delete this revoked link? This cannot be undone — the link will no longer appear anywhere, even here.'
+      )
+    )
+      return;
+    try {
+      await api(`/api/admin/shares?id=${encodeURIComponent(id)}&permanent=1`, { method: 'DELETE' });
+      reload();
+    } catch (err) {
+      setStatus(err.message);
+    }
   }
 
   async function extend(id) {
@@ -1249,6 +1284,17 @@ function SharesTab({ shares, reload, mailOn }) {
               {copiedId === s.id ? <CheckIcon /> : <CopyIcon />}
               {copiedId === s.id ? 'Copied' : 'Copy'}
             </button>
+            {s.bundleId ? (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                title="This link's bundle groups every active link for this recipient"
+                onClick={() => copyBundle(s.bundleId)}
+              >
+                {copiedBundleId === s.bundleId ? <CheckIcon /> : <LinkIcon />}
+                {copiedBundleId === s.bundleId ? 'Bundle link copied' : 'Bundle link'}
+              </button>
+            ) : null}
             {mailOn && s.status !== 'revoked' ? (
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => resend(s.id)}>
                 <MailIcon /> Resend email
@@ -1266,6 +1312,20 @@ function SharesTab({ shares, reload, mailOn }) {
                 onClick={() => revoke(s.id)}
               >
                 <XIcon /> Revoke
+              </button>
+            ) : null}
+            {s.status === 'revoked' ? (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => unrevoke(s.id)}>
+                Un-revoke
+              </button>
+            ) : null}
+            {s.status === 'revoked' ? (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm danger"
+                onClick={() => purge(s.id)}
+              >
+                <TrashIcon /> Delete permanently
               </button>
             ) : null}
           </div>

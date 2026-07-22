@@ -2,7 +2,7 @@ import { requireAdmin } from '../../../lib/guard';
 import { redis, k } from '../../../lib/redis';
 import { getVideo } from '../../../lib/bunny';
 import { logAction } from '../../../lib/audit';
-import { shareStatus, revokeShare } from '../../../lib/share';
+import { shareStatus, revokeShare, unrevokeShare, purgeShare } from '../../../lib/share';
 
 export default async function handler(req, res) {
   const admin = await requireAdmin(req, res);
@@ -49,13 +49,35 @@ export default async function handler(req, res) {
   if (req.method === 'DELETE') {
     const id = String(req.query.id || req.body?.id || '');
     if (!id) return res.status(400).json({ error: 'Bad id' });
+    const permanent = req.query.permanent === '1' || req.body?.permanent === true;
     try {
+      if (permanent) {
+        const result = await purgeShare(id);
+        if (!result.ok) return res.status(409).json({ error: result.error });
+        await logAction(admin, 'share.purge', id.slice(0, 8) + '…');
+        return res.json({ ok: true });
+      }
       const result = await revokeShare(id);
       if (!result.ok) return res.status(404).json({ error: result.error });
       await logAction(admin, 'share.revoke', id.slice(0, 8) + '…');
       return res.json({ ok: true });
     } catch {
-      return res.status(500).json({ error: 'Could not revoke' });
+      return res.status(500).json({ error: permanent ? 'Could not permanently delete' : 'Could not revoke' });
+    }
+  }
+
+  // Un-revoke: a deliberate, separate action from Extend and Bulk Revoke —
+  // restores the link with its pre-revoke expiresAt untouched, no new token.
+  if (req.method === 'PUT') {
+    const id = String(req.body?.id || '');
+    if (!id) return res.status(400).json({ error: 'Bad id' });
+    try {
+      const result = await unrevokeShare(id);
+      if (!result.ok) return res.status(409).json({ error: result.error });
+      await logAction(admin, 'share.unrevoke', id.slice(0, 8) + '…');
+      return res.json({ ok: true, expiresAt: result.share.expiresAt });
+    } catch {
+      return res.status(500).json({ error: 'Could not un-revoke' });
     }
   }
 

@@ -3,6 +3,32 @@
 All notable changes to the Marine Video Portal. Dates are UTC, matching the
 commit history (`git log --oneline`).
 
+## 2026-07-22 — Share un-revoke/permanent-delete, persistent bundle link, viewer activity
+
+- **Un-revoke** — undo an accidental revoke on a single share link: clears the
+  revoked mark and restores exactly the expiry the link had before it was
+  revoked, minting no new link/token. Kept deliberately separate from both
+  Extend and Bulk Revoke — neither can double as an un-revoke, and undoing a
+  revoke is treated as its own considered action (`lib/share.js`
+  `unrevokeShare`, `PUT /api/admin/shares`).
+- **Permanent delete** — once a link has been revoked, it can additionally be
+  hard-deleted from Redis for good. Only ever available after a soft-revoke,
+  so the irreversible step is always a deliberate second act on top of the
+  reversible one (`lib/share.js` `purgeShare`,
+  `DELETE /api/admin/shares?permanent=1`).
+- **Persistent bundle-link button** — any share row belonging to a bundle now
+  shows a durable "Bundle link" button (copies `/b/[id]`) alongside
+  Resend/Extend/Revoke, instead of only surfacing once in the share-creation
+  success toast.
+- **Watch history / "my activity"** — a new nav-bar **Activity** link opens
+  `/activity` for any signed-in approved viewer or admin. A viewer sees their
+  own watch history (the same progress data as the homepage's "Continue
+  watching," just as a full list); admins additionally get a dropdown to look
+  up any approved viewer's history by email, via a new admin-only endpoint
+  (`GET /api/admin/viewer-activity`, `requireAdmin`, restricted to approved
+  viewers) that reads the same `progress:<email>` data `/api/progress` already
+  reads for the caller's own session — no new tracking.
+
 ## 2026-07-21 — Viewer watermarking, per-video analytics, bulk video ops
 
 - **Viewer watermark** — an optional overlay of the viewer's email on
