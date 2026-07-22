@@ -9,6 +9,7 @@ import {
   addExempt,
   removeExempt,
 } from '../../../lib/watermark';
+import { geoWhitelist, adminGeoWhitelist, geoEnforcementOn, adminGeoEnforcementOn } from '../../../lib/geo';
 
 const DEFAULT_COUNT = 48;
 
@@ -23,8 +24,21 @@ export default async function handler(req, res) {
       const raw = await r.get(k('settings:homeCount'));
       homeCount = Math.min(Math.max(parseInt(raw, 10) || DEFAULT_COUNT, 1), 200);
     } catch {}
-    const [watermarkDefault, watermarkExempt] = await Promise.all([getGlobalDefault(), listExempt()]);
-    return res.json({ homeCount, watermarkDefault, watermarkExempt });
+    const [watermarkDefault, watermarkExempt, geoEnforcement, adminGeoEnforcement] = await Promise.all([
+      getGlobalDefault(),
+      listExempt(),
+      geoEnforcementOn(),
+      adminGeoEnforcementOn(),
+    ]);
+    return res.json({
+      homeCount,
+      watermarkDefault,
+      watermarkExempt,
+      geoEnforcement,
+      geoWhitelist: geoWhitelist(),
+      adminGeoEnforcement,
+      adminGeoWhitelist: adminGeoWhitelist(),
+    });
   }
 
   if (req.method === 'POST') {
@@ -47,6 +61,36 @@ export default async function handler(req, res) {
         const on = await setGlobalDefault(req.body.watermarkDefault);
         await logAction(admin, 'settings.watermarkDefault', on ? 'on' : 'off');
         return res.json({ watermarkDefault: on });
+      } catch {
+        return res.status(500).json({ error: 'Could not save' });
+      }
+    }
+
+    // Viewer geo-enforcement toggle. The whitelist itself is env-only
+    // (GEO_WHITELIST) and shown read-only in the admin UI.
+    if (typeof req.body?.geoEnforcement === 'boolean') {
+      try {
+        await r.set(k('settings:geoEnforcement'), req.body.geoEnforcement ? '1' : '0');
+        await logAction(admin, 'settings.geoEnforcement', req.body.geoEnforcement ? 'on' : 'off');
+        return res.json({ geoEnforcement: req.body.geoEnforcement });
+      } catch {
+        return res.status(500).json({ error: 'Could not save' });
+      }
+    }
+
+    // Admin geo-enforcement toggle. Separate from the viewer toggle above so
+    // an admin traveling never gets locked out by the viewer whitelist — the
+    // admin whitelist (ADMIN_GEO_WHITELIST) is a distinct env var an admin
+    // can always edit directly in Vercel even if this UI is unreachable.
+    if (typeof req.body?.adminGeoEnforcement === 'boolean') {
+      try {
+        await r.set(k('settings:adminGeoEnforcement'), req.body.adminGeoEnforcement ? '1' : '0');
+        await logAction(
+          admin,
+          'settings.adminGeoEnforcement',
+          req.body.adminGeoEnforcement ? 'on' : 'off'
+        );
+        return res.json({ adminGeoEnforcement: req.body.adminGeoEnforcement });
       } catch {
         return res.status(500).json({ error: 'Could not save' });
       }

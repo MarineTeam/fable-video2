@@ -154,6 +154,8 @@ eslint.config.mjs         ESLint 10 flat config (next/core-web-vitals)
 | `VAPID_SUBJECT` | Contact URI for push (a `mailto:` address or https URL). Defaults to `mailto:<first ADMIN_EMAILS entry>`. |
 | `RESEND_API_KEY` | Enable **emailing share links** to their recipient (via [Resend](https://resend.com)). Unset → the "Email the link" checkbox and "Resend email" button stay hidden and nothing is ever sent. |
 | `MAIL_FROM` | From address for share-link emails, e.g. `Marine Video Portal <share@yourdomain.com>` (must be a Resend-verified sender). Defaults to `onboarding@resend.dev` for testing. |
+| `GEO_WHITELIST` | Comma-separated ISO country codes viewers must connect from, e.g. `US,CA`. Only enforced once the "Enforce viewer geo whitelist" toggle is turned on in `/admin` → Settings (**off by default**); shown read-only there. Unset/empty → inert. |
+| `ADMIN_GEO_WHITELIST` | Same idea as `GEO_WHITELIST` but for admin access, checked instead of it for any `ADMIN_EMAILS` account. Kept as a separate env var so a traveling admin is never blocked by the viewer whitelist, and — if this one ever locks an admin out — it can be edited directly in Vercel without needing `/admin` to be reachable. Also toggled off by default in `/admin` → Settings. |
 
 After adding or changing any variable, **redeploy** — changes only apply to new deployments.
 
