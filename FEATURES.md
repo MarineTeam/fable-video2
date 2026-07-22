@@ -1,6 +1,6 @@
 # Marine Video Portal — Features
 
-Current as of **v2.0.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped by area; items marked _(admin)_ live in the `/admin` panel.
+Current as of **v2.3.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped by area; items marked _(admin)_ live in the `/admin` panel.
 
 ## Authentication & access control
 - Login required for every page via Auth0 (v4 SDK; `/auth/*` routes mounted by middleware).
