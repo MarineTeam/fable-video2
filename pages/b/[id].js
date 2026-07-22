@@ -1,8 +1,9 @@
 import ShareShell from '../../components/ShareShell';
 import { auth0 } from '../../lib/auth0';
-import { normalizeEmail } from '../../lib/auth';
+import { isAdmin, normalizeEmail } from '../../lib/auth';
 import { baseUrl } from '../../lib/share';
 import { loadBundle, liveBundleItems } from '../../lib/bundle';
+import { isGeoAllowed } from '../../lib/geo';
 
 // Consolidated listing for a recipient with multiple active shares. Gated
 // exactly like an individual /s/[id] link: sign in as the bundle's email and
@@ -23,6 +24,10 @@ export async function getServerSideProps({ req, res, params }) {
   }
   const email = normalizeEmail(session.user.email);
   const user = { email };
+
+  if (!(await isGeoAllowed(req, { admin: isAdmin(email) }))) {
+    return { props: { state: 'blocked', user } };
+  }
 
   const bundle = await loadBundle(id);
   if (!bundle || Date.parse(bundle.expiresAt) <= Date.now()) {
@@ -61,6 +66,16 @@ export default function Bundle({ state, user, items }) {
             This private link was created for a different account. If you received it directly,
             sign out and sign back in with the email address the link was sent to.
           </p>
+        </div>
+      </ShareShell>
+    );
+  }
+  if (state === 'blocked') {
+    return (
+      <ShareShell user={user}>
+        <div className="card card-pad notice">
+          <h1>Not available in your region</h1>
+          <p>This link isn&apos;t accessible from your current location.</p>
         </div>
       </ShareShell>
     );

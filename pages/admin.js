@@ -15,6 +15,7 @@ import { auth0 } from '../lib/auth0';
 import { isAdmin, normalizeEmail } from '../lib/auth';
 import { PRESETS, COLOR_KEYS, applyTheme, validateTheme, THEME_STORAGE_KEY } from '../lib/theme';
 import { rollupSharesByVideo } from '../lib/videoAnalytics';
+import { isGeoAllowed } from '../lib/geo';
 
 // Server-side gate: non-admins are redirected before any admin UI is sent.
 export async function getServerSideProps({ req, res }) {
@@ -24,6 +25,9 @@ export async function getServerSideProps({ req, res }) {
   }
   const email = normalizeEmail(session.user.email);
   if (!isAdmin(email)) {
+    return { redirect: { destination: '/', permanent: false } };
+  }
+  if (!(await isGeoAllowed(req, { admin: true }))) {
     return { redirect: { destination: '/', permanent: false } };
   }
   return {
@@ -1351,6 +1355,12 @@ function SettingsTab({ pushOn }) {
   const [wmExempt, setWmExempt] = useState([]);
   const [wmNewExempt, setWmNewExempt] = useState('');
   const [wmStatus, setWmStatus] = useState('');
+  const [geoEnforcement, setGeoEnforcement] = useState(false);
+  const [geoWhitelist, setGeoWhitelist] = useState([]);
+  const [geoStatus, setGeoStatus] = useState('');
+  const [adminGeoEnforcement, setAdminGeoEnforcement] = useState(false);
+  const [adminGeoWhitelist, setAdminGeoWhitelist] = useState([]);
+  const [adminGeoStatus, setAdminGeoStatus] = useState('');
 
   useEffect(() => {
     api('/api/admin/settings')
@@ -1358,6 +1368,10 @@ function SettingsTab({ pushOn }) {
         setHomeCount(String(d.homeCount));
         setWmDefault(Boolean(d.watermarkDefault));
         setWmExempt(d.watermarkExempt || []);
+        setGeoEnforcement(Boolean(d.geoEnforcement));
+        setGeoWhitelist(d.geoWhitelist || []);
+        setAdminGeoEnforcement(Boolean(d.adminGeoEnforcement));
+        setAdminGeoWhitelist(d.adminGeoWhitelist || []);
       })
       .catch(() => {});
     fetch('/api/theme')
@@ -1436,6 +1450,31 @@ function SettingsTab({ pushOn }) {
       await api('/api/admin/settings', { method: 'DELETE', body: { removeWatermarkExempt: target } });
       setWmExempt((list) => list.filter((e) => e !== target));
     } catch {}
+  }
+
+  async function toggleGeoEnforcement(on) {
+    setGeoStatus('');
+    try {
+      const data = await api('/api/admin/settings', { method: 'POST', body: { geoEnforcement: on } });
+      setGeoEnforcement(Boolean(data.geoEnforcement));
+      setGeoStatus('Saved.');
+    } catch (err) {
+      setGeoStatus(err.message);
+    }
+  }
+
+  async function toggleAdminGeoEnforcement(on) {
+    setAdminGeoStatus('');
+    try {
+      const data = await api('/api/admin/settings', {
+        method: 'POST',
+        body: { adminGeoEnforcement: on },
+      });
+      setAdminGeoEnforcement(Boolean(data.adminGeoEnforcement));
+      setAdminGeoStatus('Saved.');
+    } catch (err) {
+      setAdminGeoStatus(err.message);
+    }
   }
 
   async function broadcast(e) {
@@ -1598,6 +1637,63 @@ function SettingsTab({ pushOn }) {
           {wmExempt.length === 0 ? <span className="muted">No exemptions.</span> : null}
         </div>
         {wmStatus ? <p className="muted">{wmStatus}</p> : null}
+      </div>
+
+      <div className="card card-pad">
+        <h2 className="section-title">Geo location whitelist — viewers</h2>
+        <p className="muted">
+          Restricts viewer access (and share/bundle links) to countries in{' '}
+          <code>GEO_WHITELIST</code>, a Vercel environment variable — edit it there, then redeploy.
+          Off by default.
+        </p>
+        <label className="field-inline">
+          <input
+            type="checkbox"
+            checked={geoEnforcement}
+            onChange={(e) => toggleGeoEnforcement(e.target.checked)}
+          />
+          Enforce viewer geo whitelist
+        </label>
+        <div className="chips">
+          {geoWhitelist.map((c) => (
+            <span key={c} className="chip">
+              {c}
+            </span>
+          ))}
+          {geoWhitelist.length === 0 ? (
+            <span className="muted">No countries configured — enforcement is inert.</span>
+          ) : null}
+        </div>
+        {geoStatus ? <p className="muted">{geoStatus}</p> : null}
+      </div>
+
+      <div className="card card-pad">
+        <h2 className="section-title">Geo location whitelist — admins</h2>
+        <p className="muted">
+          Separate whitelist for admin access, from <code>ADMIN_GEO_WHITELIST</code> (also a Vercel
+          environment variable). Kept independent from the viewer whitelist above so a traveling
+          admin is never locked out by it — and if this whitelist itself ever locks an admin out,
+          it can still be fixed directly in Vercel without needing this page. Off by default.
+        </p>
+        <label className="field-inline">
+          <input
+            type="checkbox"
+            checked={adminGeoEnforcement}
+            onChange={(e) => toggleAdminGeoEnforcement(e.target.checked)}
+          />
+          Enforce admin geo whitelist
+        </label>
+        <div className="chips">
+          {adminGeoWhitelist.map((c) => (
+            <span key={c} className="chip">
+              {c}
+            </span>
+          ))}
+          {adminGeoWhitelist.length === 0 ? (
+            <span className="muted">No countries configured — enforcement is inert.</span>
+          ) : null}
+        </div>
+        {adminGeoStatus ? <p className="muted">{adminGeoStatus}</p> : null}
       </div>
 
       <div className="card card-pad">

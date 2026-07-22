@@ -11,6 +11,7 @@ Current as of **v2.0.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - **Auto sign-out after 30 minutes of inactivity** (protects a portal left open on a shared machine).
 - **API rate limiting** (sliding window) on the video list, upload, share-creation, bulk-share, bulk share actions (resend/extend/revoke), and share playback-event endpoints; fails open so an infrastructure hiccup never blocks real users.
 - Auth0 sign-ups can be disabled tenant-wide so strangers can't self-register. (Access is by email identity, so this is the primary guard against self-registering as an approved/admin address.)
+- **Geo location whitelist** _(admin, Settings tab)_ — restricts access by the connecting country (from Vercel's edge geo header). Two independent whitelists, each **off by default**: a viewer whitelist (`GEO_WHITELIST` env var, gates the homepage, `/watch/[id]`, and share/bundle links) and a separate admin whitelist (`ADMIN_GEO_WHITELIST` env var, gates `/admin` and every `/api/admin/*` route). Both whitelists are env-only and shown **read-only** in the admin UI — only the enforcement on/off toggle is editable there. Keeping the admin whitelist separate means a traveling admin is never blocked by the viewer whitelist, and even if the admin whitelist itself locks an admin out, it can still be fixed directly in Vercel without `/admin` needing to be reachable.
 
 ## Homepage & viewer experience
 - **Modern dark design** — glassmorphism, gradient accents, Inter typography.
@@ -106,6 +107,7 @@ Current as of **v2.0.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - `SENTRY_*` — enable error monitoring and source-map upload.
 - `NEXT_PUBLIC_VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` — enable push notifications (both required; generate with `npx web-push generate-vapid-keys`). `VAPID_SUBJECT` optionally overrides the contact URI.
 - `RESEND_API_KEY` — enable emailing/resending share links via Resend. `MAIL_FROM` optionally sets the from address (a Resend-verified sender; defaults to `onboarding@resend.dev`).
+- `GEO_WHITELIST` / `ADMIN_GEO_WHITELIST` — comma-separated ISO country codes for the viewer / admin geo whitelists (see Authentication & access control above). Each only takes effect once its enforcement toggle is turned on in `/admin` → Settings; off and inert by default.
 
 ## Known gaps / not yet implemented
 - **Access-request flow** — no self-serve way for unapproved users to request access; admins must know who to add.

@@ -5,6 +5,7 @@ import { PlayIcon, SearchIcon, ChevronLeftIcon, ChevronRightIcon } from '../comp
 import { auth0 } from '../lib/auth0';
 import { isAdmin, normalizeEmail } from '../lib/auth';
 import { redis, k } from '../lib/redis';
+import { isGeoAllowed } from '../lib/geo';
 
 export async function getServerSideProps({ req, res }) {
   const session = await auth0.getSession(req, res);
@@ -13,6 +14,10 @@ export async function getServerSideProps({ req, res }) {
   }
   const email = normalizeEmail(session.user.email);
   const admin = isAdmin(email);
+  const user = { email, name: session.user.name || email };
+  if (!(await isGeoAllowed(req, { admin }))) {
+    return { props: { user, isAdmin: admin, approved: false, geoBlocked: true } };
+  }
   let approved = admin;
   if (!approved) {
     try {
@@ -28,7 +33,7 @@ export async function getServerSideProps({ req, res }) {
   }
   return {
     props: {
-      user: { email, name: session.user.name || email },
+      user,
       isAdmin: admin,
       approved,
     },
@@ -45,7 +50,7 @@ function fmtDuration(seconds) {
     : `${m}:${String(sec).padStart(2, '0')}`;
 }
 
-export default function Home({ user, isAdmin: admin, approved }) {
+export default function Home({ user, isAdmin: admin, approved, geoBlocked }) {
   const [videos, setVideos] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -103,6 +108,20 @@ export default function Home({ user, isAdmin: admin, approved }) {
       .then((data) => setProgress(data?.items || []))
       .catch(() => {});
   }, [approved]);
+
+  if (geoBlocked) {
+    return (
+      <AppShell user={user} isAdmin={admin} approved={false}>
+        <div className="card card-pad notice">
+          <h1>Not available in your region</h1>
+          <p>
+            You&apos;re signed in as <strong>{user.email}</strong>, but this portal isn&apos;t
+            accessible from your current location.
+          </p>
+        </div>
+      </AppShell>
+    );
+  }
 
   if (!approved) {
     return (

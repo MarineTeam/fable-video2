@@ -7,6 +7,7 @@ import { isAdmin, normalizeEmail } from '../../lib/auth';
 import { redis, k } from '../../lib/redis';
 import { getVideo, signedEmbedUrl } from '../../lib/bunny';
 import { resolveWatermark, isExempt, getVideoMode, getGlobalDefault } from '../../lib/watermark';
+import { isGeoAllowed } from '../../lib/geo';
 
 export async function getServerSideProps({ req, res, params }) {
   const id = String(params.id || '');
@@ -20,6 +21,9 @@ export async function getServerSideProps({ req, res, params }) {
   }
   const email = normalizeEmail(session.user.email);
   const admin = isAdmin(email);
+  if (!(await isGeoAllowed(req, { admin }))) {
+    return { redirect: { destination: '/', permanent: false } };
+  }
   let approved = admin;
   if (!approved) {
     try {

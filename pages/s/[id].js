@@ -1,11 +1,12 @@
 import ResumablePlayer from '../../components/ResumablePlayer';
 import ShareShell from '../../components/ShareShell';
 import { auth0 } from '../../lib/auth0';
-import { normalizeEmail } from '../../lib/auth';
+import { isAdmin, normalizeEmail } from '../../lib/auth';
 import { redis, k } from '../../lib/redis';
 import { getVideo, signedEmbedUrl } from '../../lib/bunny';
 import { isShareActive } from '../../lib/share';
 import { resolveWatermark, isExempt, getVideoMode, getGlobalDefault } from '../../lib/watermark';
+import { isGeoAllowed } from '../../lib/geo';
 
 export async function getServerSideProps({ req, res, params }) {
   const id = String(params.id || '');
@@ -21,6 +22,10 @@ export async function getServerSideProps({ req, res, params }) {
   }
   const email = normalizeEmail(session.user.email);
   const user = { email };
+
+  if (!(await isGeoAllowed(req, { admin: isAdmin(email) }))) {
+    return { props: { state: 'blocked', user } };
+  }
 
   const key = k(`share:${id}`);
   let share = null;
@@ -108,6 +113,16 @@ export default function Share({ state, user, title, embedUrl, videoId, expiresAt
             This private link was created for a different account. If you received it directly,
             sign out and sign back in with the email address the link was sent to.
           </p>
+        </div>
+      </ShareShell>
+    );
+  }
+  if (state === 'blocked') {
+    return (
+      <ShareShell user={user}>
+        <div className="card card-pad notice">
+          <h1>Not available in your region</h1>
+          <p>This link isn&apos;t accessible from your current location.</p>
         </div>
       </ShareShell>
     );
