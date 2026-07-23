@@ -1145,6 +1145,15 @@ function SharesTab({ shares, reload, mailOn }) {
   // Every id is processed independently server-side — one bad/revoked item
   // never aborts the rest of the batch, and the per-id outcome is reported.
   async function runBulk(action) {
+    if (action === 'delete') {
+      const count = selected.size;
+      if (
+        !window.confirm(
+          `Permanently delete ${count} revoked link${count === 1 ? '' : 's'}? This cannot be undone — non-revoked links in the selection are skipped and reported as failed.`
+        )
+      )
+        return;
+    }
     setBulkBusy(true);
     setBulkResult(null);
     try {
@@ -1228,6 +1237,22 @@ function SharesTab({ shares, reload, mailOn }) {
             onClick={() => runBulk('revoke')}
           >
             <XIcon /> Revoke {selected.size}
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={bulkBusy}
+            onClick={() => runBulk('unrevoke')}
+          >
+            Un-revoke {selected.size}
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm danger"
+            disabled={bulkBusy}
+            onClick={() => runBulk('delete')}
+          >
+            <TrashIcon /> Delete {selected.size}
           </button>
         </div>
       ) : null}

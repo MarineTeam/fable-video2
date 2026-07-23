@@ -1,14 +1,17 @@
 import { requireAdmin } from '../../../lib/guard';
 import { allowRequest } from '../../../lib/ratelimit';
 import { logAction } from '../../../lib/audit';
-import { baseUrl, resendShareEmail, revokeShare } from '../../../lib/share';
-import { extendShareAndBundle } from '../../../lib/bundle';
+import { baseUrl, resendShareEmails, revokeShares, unrevokeShares, purgeShares } from '../../../lib/share';
+import { extendSharesAndBundle } from '../../../lib/bundle';
 
-const ACTIONS = new Set(['resend', 'revoke', 'extend']);
+const ACTIONS = new Set(['resend', 'revoke', 'unrevoke', 'delete', 'extend']);
 const MAX_IDS = 200;
 
 // Multi-select bulk action over existing share links. Every id is processed
 // independently — one bad/missing id never aborts the rest of the batch.
+// Each action below starts with a single batched Redis fetch (MGET) for the
+// whole selection instead of one GET per id — see lib/share.js/lib/bundle.js
+// for why that's the difference between O(1) and O(selection size) commands.
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const admin = await requireAdmin(req, res);
@@ -25,19 +28,16 @@ export default async function handler(req, res) {
   const uniqueIds = [...new Set(ids.map(String))];
   const origin = baseUrl(req);
 
-  const results = await Promise.all(
-    uniqueIds.map(async (id) => {
-      try {
-        let outcome;
-        if (action === 'resend') outcome = await resendShareEmail(id, origin);
-        else if (action === 'revoke') outcome = await revokeShare(id);
-        else outcome = await extendShareAndBundle(id, hours);
-        return { id, ok: Boolean(outcome.ok), error: outcome.ok ? undefined : outcome.error };
-      } catch (err) {
-        return { id, ok: false, error: err?.message || 'Failed' };
-      }
-    })
-  );
+  let results;
+  try {
+    if (action === 'resend') results = await resendShareEmails(uniqueIds, origin);
+    else if (action === 'revoke') results = await revokeShares(uniqueIds);
+    else if (action === 'unrevoke') results = await unrevokeShares(uniqueIds);
+    else if (action === 'delete') results = await purgeShares(uniqueIds);
+    else results = await extendSharesAndBundle(uniqueIds, hours);
+  } catch {
+    return res.status(500).json({ error: 'Could not complete the bulk action' });
+  }
 
   const okCount = results.filter((r) => r.ok).length;
   await logAction(
