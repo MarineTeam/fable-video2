@@ -1052,6 +1052,25 @@ function SharesTab({ shares, reload, mailOn }) {
   const [bulkHours, setBulkHours] = useState(72);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkResult, setBulkResult] = useState(null);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+
+  async function cleanup() {
+    setCleanupBusy(true);
+    setStatus('');
+    try {
+      const data = await api('/api/admin/cleanup', { method: 'POST' });
+      setStatus(
+        `Cleaned up: ${data.goneShares} expired share reference${data.goneShares === 1 ? '' : 's'}, ` +
+          `${data.staleBundles} empty bundle${data.staleBundles === 1 ? '' : 's'}, ` +
+          `${data.goneBundles} gone bundle reference${data.goneBundles === 1 ? '' : 's'}.`
+      );
+      reload();
+    } catch (err) {
+      setStatus(err.message);
+    } finally {
+      setCleanupBusy(false);
+    }
+  }
 
   function toggleSelect(id) {
     setSelected((prev) => {
@@ -1177,6 +1196,12 @@ function SharesTab({ shares, reload, mailOn }) {
   return (
     <div className="tab-body">
       {status ? <p className="muted">{status}</p> : null}
+
+      <p className="row-meta muted">
+        <button type="button" className="linklike" disabled={cleanupBusy} onClick={cleanup}>
+          {cleanupBusy ? 'Cleaning up…' : 'Clean up stale items'}
+        </button>
+      </p>
 
       {shares.length > 0 ? (
         <p className="row-meta muted">
