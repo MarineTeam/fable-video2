@@ -27,7 +27,7 @@ export async function getServerSideProps({ req, res }) {
   if (!isAdmin(email)) {
     return { redirect: { destination: '/', permanent: false } };
   }
-  if (!(await isGeoAllowed(req, { admin: true }))) {
+  if (!(await isGeoAllowed(req, { admin: true, email }))) {
     return { redirect: { destination: '/', permanent: false } };
   }
   return {
@@ -1361,6 +1361,7 @@ function SettingsTab({ pushOn }) {
   const [adminGeoEnforcement, setAdminGeoEnforcement] = useState(false);
   const [adminGeoWhitelist, setAdminGeoWhitelist] = useState([]);
   const [adminGeoStatus, setAdminGeoStatus] = useState('');
+  const [adminGeoBypassEmails, setAdminGeoBypassEmails] = useState([]);
 
   useEffect(() => {
     api('/api/admin/settings')
@@ -1372,6 +1373,7 @@ function SettingsTab({ pushOn }) {
         setGeoWhitelist(d.geoWhitelist || []);
         setAdminGeoEnforcement(Boolean(d.adminGeoEnforcement));
         setAdminGeoWhitelist(d.adminGeoWhitelist || []);
+        setAdminGeoBypassEmails(d.adminGeoBypassEmails || []);
       })
       .catch(() => {});
     fetch('/api/theme')
@@ -1694,6 +1696,21 @@ function SettingsTab({ pushOn }) {
           ) : null}
         </div>
         {adminGeoStatus ? <p className="muted">{adminGeoStatus}</p> : null}
+        <p className="muted" style={{ marginTop: '0.75rem' }}>
+          <code>ADMIN_GEO_BYPASS_EMAILS</code> (Vercel env var) lists admin emails that always skip
+          this check, regardless of country or the toggle above — a standing safety net to arm
+          before traveling, not an in-the-moment fix, since it needs a redeploy to take effect.
+        </p>
+        <div className="chips">
+          {adminGeoBypassEmails.map((e) => (
+            <span key={e} className="chip">
+              {e}
+            </span>
+          ))}
+          {adminGeoBypassEmails.length === 0 ? (
+            <span className="muted">No bypass emails configured.</span>
+          ) : null}
+        </div>
       </div>
 
       <div className="card card-pad">

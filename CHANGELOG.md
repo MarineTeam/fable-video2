@@ -3,6 +3,22 @@
 All notable changes to the Marine Video Portal. Dates are UTC, matching the
 commit history (`git log --oneline`).
 
+## 2026-07-23 — Admin geo-check bypass list
+
+- **`ADMIN_GEO_BYPASS_EMAILS`** — comma-separated admin emails that always
+  skip the admin geo check, regardless of country or the
+  `ADMIN_GEO_WHITELIST` enforcement toggle. Checked first in
+  `isGeoAllowed`/`isBypassedAdmin` (`lib/geo.js`) and short-circuits before
+  the whitelist or enforcement toggle are even read, so it still works
+  through a Redis outage. A standing safety net an admin arms *before*
+  traveling — like the other geo env vars, it needs a redeploy to take
+  effect, so it is not an in-the-moment fix.
+- Shown read-only in `/admin` → Settings next to the admin geo whitelist,
+  and returned from `GET /api/admin/settings` as `adminGeoBypassEmails`.
+- Threaded through every `isGeoAllowed` call site (`lib/guard.js`, `/`,
+  `/admin`, `/watch/[id]`, `/s/[id]`, `/b/[id]`), which now also pass the
+  caller's email.
+
 ## 2026-07-22 — Geo location whitelisting for viewers and admins
 
 - **Two independent, off-by-default geo whitelists** — `GEO_WHITELIST` for

@@ -21,7 +21,7 @@ export async function getServerSideProps({ req, res, params }) {
   }
   const email = normalizeEmail(session.user.email);
   const admin = isAdmin(email);
-  if (!(await isGeoAllowed(req, { admin }))) {
+  if (!(await isGeoAllowed(req, { admin, email }))) {
     return { redirect: { destination: '/', permanent: false } };
   }
   let approved = admin;
