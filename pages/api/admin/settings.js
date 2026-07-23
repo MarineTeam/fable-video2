@@ -9,7 +9,13 @@ import {
   addExempt,
   removeExempt,
 } from '../../../lib/watermark';
-import { geoWhitelist, adminGeoWhitelist, geoEnforcementOn, adminGeoEnforcementOn } from '../../../lib/geo';
+import {
+  geoWhitelist,
+  adminGeoWhitelist,
+  adminGeoBypassEmails,
+  geoEnforcementOn,
+  adminGeoEnforcementOn,
+} from '../../../lib/geo';
 
 const DEFAULT_COUNT = 48;
 
@@ -38,6 +44,7 @@ export default async function handler(req, res) {
       geoWhitelist: geoWhitelist(),
       adminGeoEnforcement,
       adminGeoWhitelist: adminGeoWhitelist(),
+      adminGeoBypassEmails: adminGeoBypassEmails(),
     });
   }
 

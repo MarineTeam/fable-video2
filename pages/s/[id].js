@@ -23,7 +23,7 @@ export async function getServerSideProps({ req, res, params }) {
   const email = normalizeEmail(session.user.email);
   const user = { email };
 
-  if (!(await isGeoAllowed(req, { admin: isAdmin(email) }))) {
+  if (!(await isGeoAllowed(req, { admin: isAdmin(email), email }))) {
     return { props: { state: 'blocked', user } };
   }
 
