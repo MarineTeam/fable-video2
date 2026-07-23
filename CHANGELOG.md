@@ -3,6 +3,40 @@
 All notable changes to the Marine Video Portal. Dates are UTC, matching the
 commit history (`git log --oneline`).
 
+## 2026-07-23 — Share/bundle Redis commands stay O(1) as share count grows
+
+- **Batched share reads.** `lib/share.js` adds `loadShares(ids)`, a single
+  `MGET` replacing what used to be one `GET` per id. At 1,000 shares this
+  turns the admin Shares list (`GET /api/admin/shares`) from ~1,000+ Redis
+  commands into ~4, regardless of how many shares exist.
+- **Same fix applied everywhere the old one-GET-per-id pattern lived:**
+  `activeSharesForEmail` (run on *every* share creation, previously rescanning
+  the entire `shares` index with one GET per existing share) and
+  `liveBundleItems` (every `/b/[id]` bundle page view) in `lib/bundle.js` now
+  both batch through `loadShares` too. Bunny video-title lookups are also
+  deduped to one call per unique `videoId` instead of one per item.
+- **Bulk actions rebuilt on the same batched fetch.** `/api/admin/shares-bulk`
+  now starts every action (`resend`, `revoke`, `unrevoke`, `delete`, `extend`)
+  with one `MGET` for the whole selection instead of one `GET` per id
+  (`revokeShares`, `unrevokeShares`, `purgeShares`, `resendShareEmails` in
+  `lib/share.js`; `extendSharesAndBundle` in `lib/bundle.js`). Per-id `SET`s
+  are still required for revoke/unrevoke/extend (each write is genuinely
+  distinct — its own timestamp), but **bulk delete** collapses all the way to
+  one multi-key `DEL` + one multi-member `SREM`, since every purge write is
+  identical. Extending a bulk selection that spans one recipient's bundle
+  now extends that bundle once, not once per selected member.
+- **Two new bulk actions**, added alongside the optimization since they were
+  previously single-link-only: **bulk un-revoke** and **bulk delete**
+  (permanent — confirmed client-side, a not-yet-revoked link in the selection
+  is reported failed rather than silently skipped).
+- **Dropped a redundant Redis round-trip in `revokeShare`/the new
+  `tagSharesBundle`:** both used to `TTL` a key before rewriting it with the
+  same remaining time; `ttlSecondsFor(expiresAt)` is exactly that value,
+  recomputed, so the extra read was pure overhead.
+- Every bulk function keeps the "one bad id never aborts the rest" guarantee
+  the old per-id `Promise.all` loop had, via a per-id `try/catch` around each
+  write.
+
 ## 2026-07-23 — Admin geo-check bypass list
 
 - **`ADMIN_GEO_BYPASS_EMAILS`** — comma-separated admin emails that always

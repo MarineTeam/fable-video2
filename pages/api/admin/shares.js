@@ -2,7 +2,7 @@ import { requireAdmin } from '../../../lib/guard';
 import { redis, k } from '../../../lib/redis';
 import { getVideo } from '../../../lib/bunny';
 import { logAction } from '../../../lib/audit';
-import { shareStatus, revokeShare, unrevokeShare, purgeShare } from '../../../lib/share';
+import { shareStatus, revokeShare, unrevokeShare, purgeShare, loadShares } from '../../../lib/share';
 
 export default async function handler(req, res) {
   const admin = await requireAdmin(req, res);
@@ -12,18 +12,22 @@ export default async function handler(req, res) {
   if (req.method === 'GET') {
     try {
       const ids = (await r.smembers(k('shares'))) || [];
+      // One MGET for every share instead of one GET per id — this is what
+      // keeps a 1,000-share list at ~4 Redis commands total instead of ~1,000.
+      const loaded = await loadShares(ids);
+      const gone = [];
       const shares = [];
-      await Promise.all(
-        ids.map(async (id) => {
-          const share = await r.get(k(`share:${id}`)).catch(() => null);
-          if (!share) {
-            // Truly gone (past its grace window) — self-prune the index.
-            await r.srem(k('shares'), id).catch(() => {});
-            return;
-          }
-          shares.push({ id, ...share, status: shareStatus(share) });
-        })
-      );
+      loaded.forEach((share, i) => {
+        if (!share) {
+          gone.push(ids[i]); // truly gone (past its grace window)
+          return;
+        }
+        shares.push({ ...share, status: shareStatus(share) });
+      });
+      if (gone.length > 0) {
+        // Self-prune the index in one multi-member SREM, not one per id.
+        await r.srem(k('shares'), ...gone).catch(() => {});
+      }
       // Titles for display, fetched once per unique video.
       const uniqueVideoIds = [...new Set(shares.map((s) => s.videoId))];
       const titles = {};
