@@ -154,7 +154,6 @@ export default function Admin({ user, mailOn, pushOn }) {
           reloadShares={loadShares}
           mailOn={mailOn}
           shareRollup={shareRollup}
-          shares={shares}
         />
       ) : null}
       {tab === 'Viewers' ? <ViewersTab viewers={viewers} reload={loadViewers} /> : null}
@@ -177,7 +176,6 @@ function VideosTab({
   reloadShares,
   mailOn,
   shareRollup,
-  shares,
 }) {
   const [filter, setFilter] = useState('');
   const [uploads, setUploads] = useState([]);
@@ -675,12 +673,7 @@ function VideosTab({
               />
             ) : null}
             {privateListFor === v.guid ? (
-              <PrivateListPanel
-                videoId={v.guid}
-                shares={shares}
-                mailOn={mailOn}
-                onChanged={() => reloadShares()}
-              />
+              <PrivateListPanel videoId={v.guid} mailOn={mailOn} onChanged={() => reloadShares()} />
             ) : null}
             {openAnalytics.has(v.guid) ? (
               <VideoAnalyticsPanel stats={shareRollup[v.guid]} />
@@ -864,13 +857,15 @@ function ShareForm({ videoId, mailOn, onCreated, copyText, copiedId }) {
 }
 
 // A persistent, editable invite for one video, layered on top of the same
-// share primitive Share/Bulk Share use. Current recipients are derived from
-// the shares already loaded for the Shares tab (filtered to this videoId and
-// status === 'active') rather than a second fetch. Adding emails skips
-// anyone already on the list untouched (no duplicate share, no re-sent
-// email); removing revokes that recipient's share immediately, and inviting
-// them again later is a fresh share.
-function PrivateListPanel({ videoId, shares, mailOn, onChanged }) {
+// share primitive Share/Bulk Share use but tracked as its own list (see
+// lib/privateList.js) — a share for the same video+email created through the
+// regular Share/Bulk Share button is invisible to this list and untouched by
+// it. Adding emails skips anyone the list already has a live invite for (no
+// duplicate share, no re-sent email); removing revokes exactly the share the
+// list itself created for that recipient, and inviting them again later is
+// a fresh share.
+function PrivateListPanel({ videoId, mailOn, onChanged }) {
+  const [entries, setEntries] = useState([]);
   const [emailsText, setEmailsText] = useState('');
   const [notify, setNotify] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -878,9 +873,16 @@ function PrivateListPanel({ videoId, shares, mailOn, onChanged }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
 
-  const entries = shares
-    .filter((s) => s.videoId === videoId && s.status === 'active')
-    .sort((a, b) => Date.parse(a.createdAt || 0) - Date.parse(b.createdAt || 0));
+  const loadEntries = useCallback(async () => {
+    try {
+      const data = await api(`/api/admin/private-list?videoId=${encodeURIComponent(videoId)}`);
+      setEntries(data.entries || []);
+    } catch {}
+  }, [videoId]);
+
+  useEffect(() => {
+    loadEntries();
+  }, [loadEntries]);
 
   async function submit(e) {
     e.preventDefault();
@@ -901,6 +903,7 @@ function PrivateListPanel({ videoId, shares, mailOn, onChanged }) {
       });
       setResult(data);
       setEmailsText('');
+      await loadEntries();
       onChanged();
     } catch (err) {
       setError(err.message);
@@ -916,6 +919,7 @@ function PrivateListPanel({ videoId, shares, mailOn, onChanged }) {
         `/api/admin/private-list?videoId=${encodeURIComponent(videoId)}&email=${encodeURIComponent(email)}`,
         { method: 'DELETE' }
       );
+      await loadEntries();
       onChanged();
     } catch {
     } finally {

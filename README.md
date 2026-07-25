@@ -76,7 +76,7 @@ pages/
       shares.js           List active share links (status + bundle) / revoke (soft-delete)
       shares-bulk.js       Bulk resend/revoke/extend over a multi-selected set of links
       bulk-share.js        Share N videos x M recipients in one action
-      private-list.js      Per-video invite list: add skips already-active emails, remove revokes immediately (rate-limited on add)
+      private-list.js      Per-video tracked invite list: list/add (skips its own already-invited emails, rate-limited) / remove (revokes only its own tracked share)
       upload.js           Create Bunny video + signed TUS auth (rate-limited)
       collections.js      Create / list / delete collections
       audit.js             Recent admin actions
@@ -103,7 +103,7 @@ lib/
   mail.js                 Resend email helpers for share links (inert without RESEND_API_KEY)
   share.js                Share-link primitives: create/resend/extend/revoke, logical-expiry model
   bundle.js               Share-bundle grouping/notification logic (one place per recipient)
-  privateList.js          Per-video active-recipient view + add/remove policy, layered on lib/share.js
+  privateList.js          Per-video invite list: its own tracked email->shareId index, layered on lib/share.js
   watermark.js            Layered watermark precedence (exempt > share > video > global default) + Redis helpers
   videoAnalytics.js       Pure rollup of existing per-share tracking, grouped by video
   ratelimit.js            Sliding-window limiter (fails open)

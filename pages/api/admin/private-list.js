@@ -6,22 +6,33 @@ import { logAction } from '../../../lib/audit';
 import { createShare, baseUrl, MAX_HOURS } from '../../../lib/share';
 import { afterShareCreated } from '../../../lib/bundle';
 import {
-  activeSharesForVideo,
+  loadPrivateList,
   splitPrivateListEmails,
+  recordPrivateListShare,
   revokePrivateListEntry,
 } from '../../../lib/privateList';
 
 const MAX_EMAILS = 50;
 
-// A video's "Private list" is a persistent, editable invite on top of the
-// existing share primitive (see lib/privateList.js): adding emails only
-// creates a share + notification for the ones not already active on this
-// video, and removing one revokes its share immediately. There is no GET
-// here — the admin UI derives the current list from the shares it already
-// loads for the Shares tab, filtered to this videoId.
+// A video's "Private list" is a persistent, editable invite, independently
+// tracked per video (see lib/privateList.js): adding emails only creates a
+// share + notification for the ones the list doesn't already have a live
+// invite for, and removing one revokes exactly the share the list itself
+// created for them — a share for the same (videoId, email) created through
+// the regular Share/Bulk Share button is untouched either way.
 export default async function handler(req, res) {
   const admin = await requireAdmin(req, res);
   if (!admin) return;
+
+  if (req.method === 'GET') {
+    const videoId = String(req.query.videoId || '');
+    if (!videoId) return res.status(400).json({ error: 'Bad videoId' });
+    try {
+      return res.json({ entries: await loadPrivateList(videoId) });
+    } catch {
+      return res.status(500).json({ error: 'Could not load the private list' });
+    }
+  }
 
   if (req.method === 'POST') {
     if (!(await allowRequest('private-list', admin, 10, 60))) {
@@ -39,8 +50,8 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: 'Bad email in list' });
     }
 
-    const active = await activeSharesForVideo(videoId);
-    const fresh = splitPrivateListEmails(normalized, active);
+    const current = await loadPrivateList(videoId);
+    const fresh = splitPrivateListEmails(normalized, current);
     const skipped = normalized.filter((e) => !fresh.includes(e));
 
     const origin = baseUrl(req);
@@ -54,6 +65,7 @@ export default async function handler(req, res) {
       created = await Promise.all(
         fresh.map(async (email) => {
           const { id, share } = await createShare({ videoId, email, hours: MAX_HOURS });
+          await recordPrivateListShare(videoId, email, share);
           return { id, email, url: `${origin}/s/${id}`, videoTitle, expiresAt: share.expiresAt };
         })
       );

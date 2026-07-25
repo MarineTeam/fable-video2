@@ -197,6 +197,7 @@ still defensively handle string values.
 | `push:subs` | HASH | endpoint → JSON `{sub, email, addedAt}` | HSET push/subscribe.js:21-23; HDEL push/unsubscribe.js:16 and push.js:86 (auto-prune on 404/410) | HGETALL push.js:60 | none |
 | `push:announced` | SET | video guids already announced | SADD push.js:102 (its return value IS the once-only guard) | (SADD return only) | none; grows one guid per announced video |
 | `rl:*` | (managed) | @upstash/ratelimit sliding-window internals | ratelimit.js:11-15 (prefix `k('rl')`) | same | managed by the library |
+| `private-list:<videoId>` | HASH | normalized email → shareId (the share this feature itself created for that recipient) (**new 2026-07-25**) | HSET `lib/privateList.js` `recordPrivateListShare`; HDEL `revokePrivateListEntry` and self-prune in `loadPrivateList` (stale/dead tracked ids swept on every read) | HGETALL `lib/privateList.js` `loadPrivateList`, via `pages/api/admin/private-list.js` (GET/POST/DELETE) | `EX` = `ttlSecondsFor(share.expiresAt)`, re-derived and extended forward (never shrunk) on every write, same idiom as `bundle:<id>`. No index SET (unlike `shares`/`bundles`) — each key is scoped to one videoId and simply expires on its own; nothing dangling to sweep. Deliberately **not** a filter over `share:<id>` by videoId: a share for the same (videoId, email) created via the regular Share/Bulk Share flow is invisible to this hash and untouched by its add/remove logic |
 
 Rules when touching this model:
 
