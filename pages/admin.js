@@ -1453,6 +1453,14 @@ function SharesTab({ shares, reload, mailOn }) {
                     </a>
                   </>
                 ) : null}
+                {s.viaPrivateList ? (
+                  <>
+                    {' · '}
+                    <span title="Created via this video's Private list — revoking or deleting it here also removes it from that list.">
+                      via Private list
+                    </span>
+                  </>
+                ) : null}
               </span>
             </div>
             {s.status === 'revoked' ? (
