@@ -76,6 +76,7 @@ pages/
       shares.js           List active share links (status + bundle) / revoke (soft-delete)
       shares-bulk.js       Bulk resend/revoke/extend over a multi-selected set of links
       bulk-share.js        Share N videos x M recipients in one action
+      private-list.js      Per-video invite list: add skips already-active emails, remove revokes immediately (rate-limited on add)
       upload.js           Create Bunny video + signed TUS auth (rate-limited)
       collections.js      Create / list / delete collections
       audit.js             Recent admin actions
@@ -102,10 +103,11 @@ lib/
   mail.js                 Resend email helpers for share links (inert without RESEND_API_KEY)
   share.js                Share-link primitives: create/resend/extend/revoke, logical-expiry model
   bundle.js               Share-bundle grouping/notification logic (one place per recipient)
+  privateList.js          Per-video active-recipient view + add/remove policy, layered on lib/share.js
   watermark.js            Layered watermark precedence (exempt > share > video > global default) + Redis helpers
   videoAnalytics.js       Pure rollup of existing per-share tracking, grouped by video
   ratelimit.js            Sliding-window limiter (fails open)
-  __tests__/              Vitest smoke tests (auth, order, theme, push, share, bundle, watermark, videoAnalytics)
+  __tests__/              Vitest smoke tests (auth, order, theme, push, share, bundle, privateList, watermark, videoAnalytics)
 public/
   manifest.webmanifest    PWA manifest
   sw.js                   Service worker (caches only icons + manifest; push handlers)
@@ -195,11 +197,11 @@ Every push / PR to `main` runs [`.github/workflows/ci.yml`](.github/workflows/ci
 
 Tabbed layout, gated server-side to `ADMIN_EMAILS`:
 
-- **Videos** — upload (drag-and-drop, progress, cancel/retry), rename, delete, drag-to-reorder, search, encoding-status badges, per-video collection assignment and **watermark override** (Default/Always/Never), per-video private share-link creation, a collapsible **per-video analytics** panel (shares, unique recipients, views, started, completed, completion rate, avg progress — rolled up from existing share tracking), multi-select **bulk share** to several recipients at once (with an optional **"email the link"** checkbox when email is configured), and multi-select **bulk delete / bulk assign-to-collection**. Also a Collections manager (create/delete).
+- **Videos** — upload (drag-and-drop, progress, cancel/retry), rename, delete, drag-to-reorder, search, encoding-status badges, per-video collection assignment and **watermark override** (Default/Always/Never), per-video private share-link creation, a **Private list** button opening a persistent, editable invite for that video (add/remove recipients directly, see below), a collapsible **per-video analytics** panel (shares, unique recipients, views, started, completed, completion rate, avg progress — rolled up from existing share tracking), multi-select **bulk share** to several recipients at once (with an optional **"email the link"** checkbox when email is configured), and multi-select **bulk delete / bulk assign-to-collection**. Also a Collections manager (create/delete).
 - **Viewers** — add/remove approved emails, **bulk add** (paste a list), and each viewer's **last-seen** time.
 - **Shares** — every share link with recipient, expiry, **Active/Expired/Revoked** status, view count + last-viewed time, and real playback signal (plays, furthest %, Completed). Multi-select for **bulk resend / bulk extend / bulk revoke / bulk un-revoke / bulk delete**, each reporting per-link success/failure (un-revoke and delete are their own deliberate actions — Extend and Bulk Revoke never silently restore or purge a link as a side effect). Per-link **resend**, **extend** (push expiry forward without a new link), **revoke** (instant, soft-delete), **Un-revoke** (restores the exact link, no new token), and, once revoked, **Delete permanently** (irreversible hard-delete, only ever available after a soft-revoke — bulk delete silently skips and reports-failed any selected link that isn't already revoked). Links that are part of a bundle show a persistent **Bundle link** button (copies `/b/[id]`) alongside Resend/Extend/Revoke, not just in the one-time share-creation toast. Share creation (single and bulk) includes a **watermark** override (Default/Always/Never).
 - **Settings** — homepage video count, the site **color palette** (7 presets + custom, applied to all visitors), a **push broadcast** composer, **viewer watermark** controls (global on/off default + a viewer-exemption list), **geo location whitelist** enforcement toggles for viewers and admins (each off by default, with their `GEO_WHITELIST`/`ADMIN_GEO_WHITELIST` country lists and the `ADMIN_GEO_BYPASS_EMAILS` bypass list all shown read-only), and a content-protection info panel.
-- **Activity** — the most recent admin actions (add/remove viewer, share create/resend/extend/revoke/unrevoke/purge including bulk actions, video rename/delete/reorder/watermark including bulk actions, settings, palette, watermark exemptions, collections).
+- **Activity** — the most recent admin actions (add/remove viewer, share create/resend/extend/revoke/unrevoke/purge including bulk actions, private-list add/remove, video rename/delete/reorder/watermark including bulk actions, settings, palette, watermark exemptions, collections).
 - **Analytics** — total views, 30-day views, watch time, video count, a 30-day views chart, a most-watched list, and a **share performance by video** list (shares, recipients, views, started, completed, completion rate, avg progress — the same rollup as the Videos tab's per-video panel, no extra fetch).
 
 A nav-bar **Activity** link (any signed-in approved viewer or admin) opens `/activity` — a viewer sees their own watch history; an admin additionally gets a dropdown to look up any approved viewer's history by email (`GET /api/admin/viewer-activity`, `requireAdmin`, reads that viewer's own `progress:<email>` data — nothing new is tracked).

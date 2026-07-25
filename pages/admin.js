@@ -154,6 +154,7 @@ export default function Admin({ user, mailOn, pushOn }) {
           reloadShares={loadShares}
           mailOn={mailOn}
           shareRollup={shareRollup}
+          shares={shares}
         />
       ) : null}
       {tab === 'Viewers' ? <ViewersTab viewers={viewers} reload={loadViewers} /> : null}
@@ -176,6 +177,7 @@ function VideosTab({
   reloadShares,
   mailOn,
   shareRollup,
+  shares,
 }) {
   const [filter, setFilter] = useState('');
   const [uploads, setUploads] = useState([]);
@@ -183,6 +185,7 @@ function VideosTab({
   const [dragIndex, setDragIndex] = useState(null);
   const [editing, setEditing] = useState(null); // { guid, title }
   const [shareFor, setShareFor] = useState(null); // guid
+  const [privateListFor, setPrivateListFor] = useState(null); // guid
   const [copiedId, setCopiedId] = useState('');
   const [newCollection, setNewCollection] = useState('');
   const [selected, setSelected] = useState(new Set());
@@ -645,6 +648,13 @@ function VideosTab({
             >
               <LinkIcon /> Share
             </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => setPrivateListFor(privateListFor === v.guid ? null : v.guid)}
+            >
+              Private list
+            </button>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => toggleAnalytics(v.guid)}>
               Analytics
             </button>
@@ -662,6 +672,14 @@ function VideosTab({
                 onCreated={() => reloadShares()}
                 copyText={copyText}
                 copiedId={copiedId}
+              />
+            ) : null}
+            {privateListFor === v.guid ? (
+              <PrivateListPanel
+                videoId={v.guid}
+                shares={shares}
+                mailOn={mailOn}
+                onChanged={() => reloadShares()}
               />
             ) : null}
             {openAnalytics.has(v.guid) ? (
@@ -842,6 +860,120 @@ function ShareForm({ videoId, mailOn, onCreated, copyText, copiedId }) {
         </span>
       ) : null}
     </form>
+  );
+}
+
+// A persistent, editable invite for one video, layered on top of the same
+// share primitive Share/Bulk Share use. Current recipients are derived from
+// the shares already loaded for the Shares tab (filtered to this videoId and
+// status === 'active') rather than a second fetch. Adding emails skips
+// anyone already on the list untouched (no duplicate share, no re-sent
+// email); removing revokes that recipient's share immediately, and inviting
+// them again later is a fresh share.
+function PrivateListPanel({ videoId, shares, mailOn, onChanged }) {
+  const [emailsText, setEmailsText] = useState('');
+  const [notify, setNotify] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [removing, setRemoving] = useState('');
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+
+  const entries = shares
+    .filter((s) => s.videoId === videoId && s.status === 'active')
+    .sort((a, b) => Date.parse(a.createdAt || 0) - Date.parse(b.createdAt || 0));
+
+  async function submit(e) {
+    e.preventDefault();
+    const emails = [...new Set(
+      emailsText
+        .split(/[\s,;]+/)
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean)
+    )];
+    if (emails.length === 0) return;
+    setBusy(true);
+    setError('');
+    setResult(null);
+    try {
+      const data = await api('/api/admin/private-list', {
+        method: 'POST',
+        body: { videoId, emails, sendEmail: notify },
+      });
+      setResult(data);
+      setEmailsText('');
+      onChanged();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(email) {
+    setRemoving(email);
+    try {
+      await api(
+        `/api/admin/private-list?videoId=${encodeURIComponent(videoId)}&email=${encodeURIComponent(email)}`,
+        { method: 'DELETE' }
+      );
+      onChanged();
+    } catch {
+    } finally {
+      setRemoving('');
+    }
+  }
+
+  return (
+    <div className="private-list-panel">
+      <div className="private-list-rows">
+        {entries.map((s) => (
+          <span key={s.id} className="chip">
+            {s.email}
+            <button
+              type="button"
+              className="btn-icon"
+              title="Revoke access"
+              disabled={removing === s.email}
+              onClick={() => remove(s.email)}
+            >
+              <XIcon width={12} height={12} />
+            </button>
+          </span>
+        ))}
+        {entries.length === 0 ? <p className="muted">No one has private access yet.</p> : null}
+      </div>
+      <form className="private-list-form" onSubmit={submit}>
+        <textarea
+          className="input"
+          rows={2}
+          placeholder={'alice@example.com\nbob@example.com'}
+          value={emailsText}
+          onChange={(e) => setEmailsText(e.target.value)}
+        />
+        {mailOn ? (
+          <label className="field-inline">
+            <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />
+            Notify new people by email
+          </label>
+        ) : null}
+        <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
+          {busy ? 'Adding…' : 'Add to list'}
+        </button>
+        {error ? <span className="error-text">{error}</span> : null}
+      </form>
+      {result ? (
+        <p className="muted">
+          {result.added.length > 0
+            ? `Added ${result.added.length}${
+                mailOn && notify ? ` (${result.added.filter((a) => a.emailed).length} emailed)` : ''
+              }`
+            : ''}
+          {result.skipped.length > 0
+            ? `${result.added.length > 0 ? ' · ' : ''}Already on the list: ${result.skipped.join(', ')}`
+            : ''}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
