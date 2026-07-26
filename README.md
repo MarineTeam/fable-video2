@@ -69,10 +69,11 @@ pages/
     admin/
       videos.js           List (ordered, with watermark mode) / rename / set-collection / set watermark mode / delete
       videos-bulk.js       Bulk delete / bulk assign-to-collection over a multi-selected set of videos
-      viewers.js          List (with last-seen) / add (single or bulk) / remove
+      viewers.js          List (with last-seen + tags) / add (single or bulk) / remove
+      viewers-bulk.js      Bulk add-tag / remove-tag over a multi-selected set of viewers
       settings.js         Homepage video count, global watermark default + exemption list
       order.js            Custom homepage video order
-      share.js            Create/resend/extend a single private share link (rate-limited)
+      share.js            Create link(s) for one video x 1+ recipients / resend / extend (rate-limited)
       shares.js           List active share links (status + bundle) / revoke (soft-delete)
       shares-bulk.js       Bulk resend/revoke/extend over a multi-selected set of links
       bulk-share.js        Share N videos x M recipients in one action
@@ -88,6 +89,7 @@ components/
   IdleTimeout.js          30-minute inactivity auto sign-out
   ResumablePlayer.js      Wraps the Bunny embed via player.js for resume + progress + share playback events
   NotifyButton.js         Per-device push opt-in/out toggle
+  EmailTagInput.js        Multi-email entry as removable chips/tags (used by Share and Private list forms)
   icons.js                Inline SVG icons
 lib/
   auth0.js                Auth0Client instance (v4 SDK)
@@ -104,10 +106,11 @@ lib/
   share.js                Share-link primitives: create/resend/extend/revoke, logical-expiry model
   bundle.js               Share-bundle grouping/notification logic (one place per recipient)
   privateList.js          Per-video invite list: its own tracked email->shareId index, layered on lib/share.js
+  viewerTags.js           Viewer tags/groups: per-viewer tag list + bulk add-tag/remove-tag over a selection
   watermark.js            Layered watermark precedence (exempt > share > video > global default) + Redis helpers
   videoAnalytics.js       Pure rollup of existing per-share tracking, grouped by video
   ratelimit.js            Sliding-window limiter (fails open)
-  __tests__/              Vitest smoke tests (auth, order, theme, push, share, bundle, privateList, watermark, videoAnalytics)
+  __tests__/              Vitest smoke tests (auth, order, theme, push, share, bundle, privateList, watermark, videoAnalytics, viewerTags)
 public/
   manifest.webmanifest    PWA manifest
   sw.js                   Service worker (caches only icons + manifest; push handlers)
@@ -197,8 +200,8 @@ Every push / PR to `main` runs [`.github/workflows/ci.yml`](.github/workflows/ci
 
 Tabbed layout, gated server-side to `ADMIN_EMAILS`:
 
-- **Videos** — upload (drag-and-drop, progress, cancel/retry), rename, delete, drag-to-reorder, search, encoding-status badges, per-video collection assignment and **watermark override** (Default/Always/Never), per-video private share-link creation, a **Private list** button opening a persistent, editable invite for that video (add/remove recipients directly, see below), a collapsible **per-video analytics** panel (shares, unique recipients, views, started, completed, completion rate, avg progress — rolled up from existing share tracking), multi-select **bulk share** to several recipients at once (with an optional **"email the link"** checkbox when email is configured), and multi-select **bulk delete / bulk assign-to-collection**. Also a Collections manager (create/delete).
-- **Viewers** — add/remove approved emails, **bulk add** (paste a list), and each viewer's **last-seen** time.
+- **Videos** — upload (drag-and-drop, progress, cancel/retry), rename, delete, drag-to-reorder, search, encoding-status badges, per-video collection assignment and **watermark override** (Default/Always/Never), per-video private share-link creation to **one or more recipients at once** (emails entered as removable chips/tags, with a picker to add every viewer carrying a given tag), a **Private list** button opening a persistent, editable invite for that video with the same chip/tag-picker recipient entry (add/remove recipients directly, see below), a collapsible **per-video analytics** panel (shares, unique recipients, views, started, completed, completion rate, avg progress — rolled up from existing share tracking), multi-select **bulk share** to several recipients at once (with an optional **"email the link"** checkbox when email is configured, and the same by-tag picker), and multi-select **bulk delete / bulk assign-to-collection**. Also a Collections manager (create/delete) with a **Share** button per collection that pre-selects every video in it and opens the same bulk-share form, instead of picking videos by hand.
+- **Viewers** — add/remove approved emails, **bulk add** (paste a list), each viewer's **last-seen** time, and **tags/groups** (e.g. "Team A") — add/remove a tag per viewer inline, or multi-select viewers and tag/untag the selection in one action; a filter-by-tag dropdown narrows the list. Tags are pure grouping labels and feed the share forms' by-tag recipient picker above; they don't themselves grant access.
 - **Shares** — every share link with recipient, expiry, **Active/Expired/Revoked** status, view count + last-viewed time, and real playback signal (plays, furthest %, Completed). Multi-select for **bulk resend / bulk extend / bulk revoke / bulk un-revoke / bulk delete**, each reporting per-link success/failure (un-revoke and delete are their own deliberate actions — Extend and Bulk Revoke never silently restore or purge a link as a side effect). Per-link **resend**, **extend** (push expiry forward without a new link), **revoke** (instant, soft-delete), **Un-revoke** (restores the exact link, no new token), and, once revoked, **Delete permanently** (irreversible hard-delete, only ever available after a soft-revoke — bulk delete silently skips and reports-failed any selected link that isn't already revoked). Links that are part of a bundle show a persistent **Bundle link** button (copies `/b/[id]`) alongside Resend/Extend/Revoke, not just in the one-time share-creation toast. Share creation (single and bulk) includes a **watermark** override (Default/Always/Never).
 - **Settings** — homepage video count, the site **color palette** (7 presets + custom, applied to all visitors), a **push broadcast** composer, **viewer watermark** controls (global on/off default + a viewer-exemption list), **geo location whitelist** enforcement toggles for viewers and admins (each off by default, with their `GEO_WHITELIST`/`ADMIN_GEO_WHITELIST` country lists and the `ADMIN_GEO_BYPASS_EMAILS` bypass list all shown read-only), and a content-protection info panel.
 - **Activity** — the most recent admin actions (add/remove viewer, share create/resend/extend/revoke/unrevoke/purge including bulk actions, private-list add/remove, video rename/delete/reorder/watermark including bulk actions, settings, palette, watermark exemptions, collections).

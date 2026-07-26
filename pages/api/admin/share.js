@@ -6,6 +6,8 @@ import { logAction } from '../../../lib/audit';
 import { createShare, clampHours, baseUrl, resendShareEmail } from '../../../lib/share';
 import { extendShareAndBundle, afterShareCreated } from '../../../lib/bundle';
 
+const MAX_EMAILS = 50;
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const admin = await requireAdmin(req, res);
@@ -33,37 +35,61 @@ export default async function handler(req, res) {
     return res.json({ ok: true, expiresAt: result.expiresAt });
   }
 
-  // Create a new link.
-  const { videoId, email, hours, sendEmail, watermark } = req.body || {};
+  // Create a new link — one video, one or more recipients in a single
+  // request (each still gets their own independently-revocable share).
+  const { videoId, emails, hours, sendEmail, watermark } = req.body || {};
   if (typeof videoId !== 'string' || !videoId || videoId.length > 64) {
     return res.status(400).json({ error: 'Bad videoId' });
   }
-  const recipient = normalizeEmail(email);
-  if (!isValidEmail(recipient)) return res.status(400).json({ error: 'Bad recipient email' });
+  if (!Array.isArray(emails) || emails.length === 0 || emails.length > MAX_EMAILS) {
+    return res.status(400).json({ error: `Provide 1-${MAX_EMAILS} recipient emails` });
+  }
+  const recipients = [...new Set(emails.map(normalizeEmail))].filter(Boolean);
+  if (recipients.length === 0 || recipients.some((e) => !isValidEmail(e))) {
+    return res.status(400).json({ error: 'Bad recipient email in list' });
+  }
   const ttlHours = clampHours(hours);
 
-  let id, share;
-  try {
-    ({ id, share } = await createShare({ videoId, email: recipient, hours: ttlHours, watermark }));
-  } catch {
-    return res.status(500).json({ error: 'Could not create link' });
-  }
-  await logAction(admin, 'share.create', `${recipient} · video ${videoId} · ${ttlHours}h`);
-
   const origin = baseUrl(req);
-  const url = `${origin}/s/${id}`;
   let videoTitle = '';
   try {
     videoTitle = (await getVideo(videoId))?.title || '';
   } catch {}
 
-  // Best-effort: a mail failure never blocks link creation.
-  const { emailed, bundleId } = await afterShareCreated({
-    email: recipient,
-    newItems: [{ id, url, videoTitle, expiresAt: share.expiresAt }],
-    sendEmail: Boolean(sendEmail),
-    origin,
-  });
+  let created;
+  try {
+    created = await Promise.all(
+      recipients.map(async (recipient) => {
+        const { id, share } = await createShare({ videoId, email: recipient, hours: ttlHours, watermark });
+        return { id, email: recipient, url: `${origin}/s/${id}`, videoTitle, expiresAt: share.expiresAt };
+      })
+    );
+  } catch {
+    return res.status(500).json({ error: 'Could not create link(s)' });
+  }
+  await logAction(admin, 'share.create', `${recipients.join(', ')} · video ${videoId} · ${ttlHours}h`);
 
-  res.json({ id, url, expiresAt: share.expiresAt, emailed, bundleId });
+  // Best-effort per recipient: a mail failure never blocks link creation.
+  const outcomes = {};
+  await Promise.all(
+    created.map(async (item) => {
+      outcomes[item.email] = await afterShareCreated({
+        email: item.email,
+        newItems: [item],
+        sendEmail: Boolean(sendEmail),
+        origin,
+      });
+    })
+  );
+
+  res.json({
+    created: created.map((c) => ({
+      id: c.id,
+      email: c.email,
+      url: c.url,
+      expiresAt: c.expiresAt,
+      emailed: outcomes[c.email]?.emailed || false,
+      bundleId: outcomes[c.email]?.bundleId || null,
+    })),
+  });
 }
