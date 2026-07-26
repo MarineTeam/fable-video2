@@ -65,7 +65,7 @@ export default async function handler(req, res) {
       created = await Promise.all(
         fresh.map(async (email) => {
           const { id, share } = await createShare({ videoId, email, hours: MAX_HOURS });
-          await recordPrivateListShare(videoId, email, share);
+          await recordPrivateListShare(videoId, email, id, share);
           return { id, email, url: `${origin}/s/${id}`, videoTitle, expiresAt: share.expiresAt };
         })
       );
