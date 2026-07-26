@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AppShell from '../components/AppShell';
+import EmailTagInput from '../components/EmailTagInput';
 import {
   CheckIcon,
   CopyIcon,
@@ -692,13 +693,19 @@ function VideosTab({
               <ShareForm
                 videoId={v.guid}
                 mailOn={mailOn}
+                viewers={viewers}
                 onCreated={() => reloadShares()}
                 copyText={copyText}
                 copiedId={copiedId}
               />
             ) : null}
             {privateListFor === v.guid ? (
-              <PrivateListPanel videoId={v.guid} mailOn={mailOn} onChanged={() => reloadShares()} />
+              <PrivateListPanel
+                videoId={v.guid}
+                mailOn={mailOn}
+                viewers={viewers}
+                onChanged={() => reloadShares()}
+              />
             ) : null}
             {openAnalytics.has(v.guid) ? (
               <VideoAnalyticsPanel stats={shareRollup[v.guid]} />
@@ -798,8 +805,47 @@ function VideoAnalyticsPanel({ stats }) {
   );
 }
 
-function ShareForm({ videoId, mailOn, onCreated, copyText, copiedId }) {
-  const [email, setEmail] = useState('');
+// A tag is a label an admin can attach to approved viewers (Viewers tab).
+// This lets any multi-email recipient form add every viewer with a given
+// tag in one click, instead of typing each email by hand. Shared by
+// ShareForm and PrivateListPanel; BulkShareForm keeps its own longer-lived
+// inline version since it drives a raw textarea, not an array.
+function AddViewersByTag({ viewers, onAdd }) {
+  const [tagPick, setTagPick] = useState('');
+  const availableTags = useMemo(
+    () => [...new Set((viewers || []).flatMap((v) => v.tags || []))].sort(),
+    [viewers]
+  );
+  if (availableTags.length === 0) return null;
+
+  function add() {
+    if (!tagPick) return;
+    const tagged = (viewers || []).filter((v) => (v.tags || []).includes(tagPick)).map((v) => v.email);
+    if (tagged.length > 0) onAdd(tagged);
+  }
+
+  return (
+    <div className="field-row">
+      <label className="field-inline">
+        Add viewers by tag
+        <select className="select" value={tagPick} onChange={(e) => setTagPick(e.target.value)}>
+          <option value="">Pick a tag…</option>
+          {availableTags.map((tag) => (
+            <option key={tag} value={tag}>
+              {tag}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button type="button" className="btn btn-ghost btn-sm" disabled={!tagPick} onClick={add}>
+        Add
+      </button>
+    </div>
+  );
+}
+
+function ShareForm({ videoId, mailOn, viewers, onCreated, copyText, copiedId }) {
+  const [emails, setEmails] = useState([]);
   const [hours, setHours] = useState(72);
   const [sendEmail, setSendEmail] = useState(false);
   const [watermark, setWatermark] = useState('default');
@@ -809,14 +855,17 @@ function ShareForm({ videoId, mailOn, onCreated, copyText, copiedId }) {
 
   async function submit(e) {
     e.preventDefault();
+    if (emails.length === 0) return;
     setBusy(true);
     setError('');
+    setResult(null);
     try {
       const data = await api('/api/admin/share', {
         method: 'POST',
-        body: { videoId, email, hours: Number(hours), sendEmail, watermark },
+        body: { videoId, emails, hours: Number(hours), sendEmail, watermark },
       });
       setResult(data);
+      setEmails([]);
       onCreated();
     } catch (err) {
       setError(err.message);
@@ -827,13 +876,15 @@ function ShareForm({ videoId, mailOn, onCreated, copyText, copiedId }) {
 
   return (
     <form className="share-form" onSubmit={submit}>
-      <input
-        className="input"
-        type="email"
-        required
-        placeholder="Recipient email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
+      <AddViewersByTag
+        viewers={viewers}
+        onAdd={(tagged) => setEmails((prev) => [...new Set([...prev, ...tagged])])}
+      />
+      <EmailTagInput
+        value={emails}
+        onChange={setEmails}
+        placeholder="Recipient email(s)"
+        ariaLabel="Recipient email(s)"
       />
       <label className="field-inline">
         Expires in
@@ -862,30 +913,31 @@ function ShareForm({ videoId, mailOn, onCreated, copyText, copiedId }) {
             checked={sendEmail}
             onChange={(e) => setSendEmail(e.target.checked)}
           />
-          Email the link to the recipient
+          Email the link to each recipient
         </label>
       ) : null}
-      <button type="submit" className="btn btn-primary btn-sm" disabled={busy}>
-        {busy ? 'Creating…' : 'Create link'}
+      <button type="submit" className="btn btn-primary btn-sm" disabled={busy || emails.length === 0}>
+        {busy ? 'Creating…' : `Create ${emails.length || ''} link${emails.length === 1 ? '' : 's'}`}
       </button>
       {error ? <span className="error-text">{error}</span> : null}
       {result ? (
-        <span className="share-result">
-          <code>{result.url}</code>
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => copyText(result.url, result.id)}
-          >
-            {copiedId === result.id ? <CheckIcon /> : <CopyIcon />}
-            {copiedId === result.id ? 'Copied' : 'Copy'}
-          </button>
-          {result.emailed ? (
-            <span className="badge badge-ok">
-              <MailIcon /> Emailed
-            </span>
-          ) : null}
-        </span>
+        <ul className="share-result-list">
+          {result.created.map((r) => (
+            <li key={r.id}>
+              <span className="muted">{r.email}</span>
+              <code>{r.url}</code>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => copyText(r.url, r.id)}>
+                {copiedId === r.id ? <CheckIcon /> : <CopyIcon />}
+                {copiedId === r.id ? 'Copied' : 'Copy'}
+              </button>
+              {r.emailed ? (
+                <span className="badge badge-ok">
+                  <MailIcon /> Emailed
+                </span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
       ) : null}
     </form>
   );
@@ -899,9 +951,9 @@ function ShareForm({ videoId, mailOn, onCreated, copyText, copiedId }) {
 // duplicate share, no re-sent email); removing revokes exactly the share the
 // list itself created for that recipient, and inviting them again later is
 // a fresh share.
-function PrivateListPanel({ videoId, mailOn, onChanged }) {
+function PrivateListPanel({ videoId, mailOn, viewers, onChanged }) {
   const [entries, setEntries] = useState([]);
-  const [emailsText, setEmailsText] = useState('');
+  const [emails, setEmails] = useState([]);
   const [notify, setNotify] = useState(true);
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState('');
@@ -921,12 +973,6 @@ function PrivateListPanel({ videoId, mailOn, onChanged }) {
 
   async function submit(e) {
     e.preventDefault();
-    const emails = [...new Set(
-      emailsText
-        .split(/[\s,;]+/)
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean)
-    )];
     if (emails.length === 0) return;
     setBusy(true);
     setError('');
@@ -937,7 +983,7 @@ function PrivateListPanel({ videoId, mailOn, onChanged }) {
         body: { videoId, emails, sendEmail: notify },
       });
       setResult(data);
-      setEmailsText('');
+      setEmails([]);
       await loadEntries();
       onChanged();
     } catch (err) {
@@ -982,12 +1028,15 @@ function PrivateListPanel({ videoId, mailOn, onChanged }) {
         {entries.length === 0 ? <p className="muted">No one has private access yet.</p> : null}
       </div>
       <form className="private-list-form" onSubmit={submit}>
-        <textarea
-          className="input"
-          rows={2}
-          placeholder={'alice@example.com\nbob@example.com'}
-          value={emailsText}
-          onChange={(e) => setEmailsText(e.target.value)}
+        <AddViewersByTag
+          viewers={viewers}
+          onAdd={(tagged) => setEmails((prev) => [...new Set([...prev, ...tagged])])}
+        />
+        <EmailTagInput
+          value={emails}
+          onChange={setEmails}
+          placeholder="alice@example.com, bob@example.com"
+          ariaLabel="Emails to add to the private list"
         />
         {mailOn ? (
           <label className="field-inline">
