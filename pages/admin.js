@@ -149,6 +149,7 @@ export default function Admin({ user, mailOn, pushOn }) {
           videos={videos}
           setVideos={setVideos}
           collections={collections}
+          viewers={viewers}
           reloadVideos={loadVideos}
           reloadCollections={loadCollections}
           reloadShares={loadShares}
@@ -167,10 +168,15 @@ export default function Admin({ user, mailOn, pushOn }) {
 
 // ---------------------------------------------------------------- Videos tab
 
+// A collection can hold more videos than one bulk-share action accepts —
+// keep this in lockstep with MAX_VIDEOS in pages/api/admin/bulk-share.js.
+const BULK_SHARE_MAX_VIDEOS = 50;
+
 function VideosTab({
   videos,
   setVideos,
   collections,
+  viewers,
   reloadVideos,
   reloadCollections,
   reloadShares,
@@ -186,6 +192,7 @@ function VideosTab({
   const [privateListFor, setPrivateListFor] = useState(null); // guid
   const [copiedId, setCopiedId] = useState('');
   const [newCollection, setNewCollection] = useState('');
+  const [collectionShareNotice, setCollectionShareNotice] = useState('');
   const [selected, setSelected] = useState(new Set());
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkCollection, setBulkCollection] = useState('');
@@ -306,6 +313,7 @@ function VideosTab({
     setSelected(new Set());
     setBulkOpen(false);
     setBulkVideoResult(null);
+    setCollectionShareNotice('');
   }
 
   function toggleAnalytics(guid) {
@@ -391,6 +399,22 @@ function VideosTab({
       reloadCollections();
       reloadVideos();
     } catch {}
+  }
+
+  // Reuses the exact same bulk-share machinery as selecting videos by hand:
+  // populate the multi-select with every video in the collection and open
+  // the same BulkShareForm used by the toolbar above.
+  function shareCollection(guid) {
+    const ids = videos.filter((v) => v.collectionId === guid).map((v) => v.guid);
+    if (!ids.length) return;
+    setCollectionShareNotice(
+      ids.length > BULK_SHARE_MAX_VIDEOS
+        ? `Collection has ${ids.length} videos — only the first ${BULK_SHARE_MAX_VIDEOS} were selected.`
+        : ''
+    );
+    setSelected(new Set(ids.slice(0, BULK_SHARE_MAX_VIDEOS)));
+    setBulkOpen(true);
+    setBulkVideoResult(null);
   }
 
   const shown = filter
@@ -539,6 +563,7 @@ function VideosTab({
         <BulkShareForm
           videoIds={[...selected]}
           mailOn={mailOn}
+          viewers={viewers}
           onCreated={() => {
             reloadShares();
             clearSelect();
@@ -703,6 +728,15 @@ function VideosTab({
               <button
                 type="button"
                 className="btn-icon"
+                title="Share this whole collection"
+                disabled={c.videoCount === 0}
+                onClick={() => shareCollection(c.guid)}
+              >
+                <LinkIcon width={12} height={12} />
+              </button>
+              <button
+                type="button"
+                className="btn-icon"
                 title="Delete collection"
                 onClick={() => removeCollection(c.guid, c.name)}
               >
@@ -712,6 +746,7 @@ function VideosTab({
           ))}
           {collections.length === 0 ? <span className="muted">None yet.</span> : null}
         </div>
+        {collectionShareNotice ? <p className="muted">{collectionShareNotice}</p> : null}
       </div>
     </div>
   );
@@ -981,14 +1016,20 @@ function PrivateListPanel({ videoId, mailOn, onChanged }) {
   );
 }
 
-function BulkShareForm({ videoIds, mailOn, onCreated }) {
+function BulkShareForm({ videoIds, mailOn, viewers, onCreated }) {
   const [emailsText, setEmailsText] = useState('');
   const [hours, setHours] = useState(72);
   const [sendEmail, setSendEmail] = useState(false);
   const [watermark, setWatermark] = useState('default');
+  const [tagPick, setTagPick] = useState('');
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+
+  const availableTags = useMemo(
+    () => [...new Set((viewers || []).flatMap((v) => v.tags || []))].sort(),
+    [viewers]
+  );
 
   const emails = [...new Set(
     emailsText
@@ -997,6 +1038,21 @@ function BulkShareForm({ videoIds, mailOn, onCreated }) {
       .filter(Boolean)
   )];
   const totalLinks = videoIds.length * emails.length;
+
+  function addByTag() {
+    if (!tagPick) return;
+    const tagged = (viewers || [])
+      .filter((v) => (v.tags || []).includes(tagPick))
+      .map((v) => v.email);
+    if (!tagged.length) return;
+    setEmailsText((prev) => {
+      const existing = new Set(
+        prev.split(/[\s,;]+/).map((e) => e.trim().toLowerCase()).filter(Boolean)
+      );
+      const merged = [...existing, ...tagged];
+      return merged.join('\n');
+    });
+  }
 
   async function submit(e) {
     e.preventDefault();
@@ -1019,6 +1075,28 @@ function BulkShareForm({ videoIds, mailOn, onCreated }) {
 
   return (
     <form className="card card-pad bulk-share-form" onSubmit={submit}>
+      {availableTags.length > 0 ? (
+        <div className="field-row">
+          <label className="field-inline">
+            Add viewers by tag
+            <select
+              className="select"
+              value={tagPick}
+              onChange={(e) => setTagPick(e.target.value)}
+            >
+              <option value="">Pick a tag…</option>
+              {availableTags.map((tag) => (
+                <option key={tag} value={tag}>
+                  {tag}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button type="button" className="btn btn-ghost btn-sm" disabled={!tagPick} onClick={addByTag}>
+            Add
+          </button>
+        </div>
+      ) : null}
       <label className="field-block">
         Recipients (one per line, or comma-separated)
         <textarea
@@ -1091,6 +1169,17 @@ function ViewersTab({ viewers, reload }) {
   const [bulk, setBulk] = useState('');
   const [showBulk, setShowBulk] = useState(false);
   const [status, setStatus] = useState('');
+  const [tagFilter, setTagFilter] = useState('');
+  const [selected, setSelected] = useState(new Set());
+  const [bulkTag, setBulkTag] = useState('');
+  const [bulkTagBusy, setBulkTagBusy] = useState(false);
+  const [rowTagInputs, setRowTagInputs] = useState({}); // email -> draft tag text
+
+  const availableTags = useMemo(
+    () => [...new Set(viewers.flatMap((v) => v.tags || []))].sort(),
+    [viewers]
+  );
+  const shown = tagFilter ? viewers.filter((v) => (v.tags || []).includes(tagFilter)) : viewers;
 
   async function add(e) {
     e.preventDefault();
@@ -1118,6 +1207,62 @@ function ViewersTab({ viewers, reload }) {
       await api('/api/admin/viewers', { method: 'DELETE', body: { email: target } });
       reload();
     } catch {}
+  }
+
+  function toggleSelect(target) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(target)) next.delete(target);
+      else next.add(target);
+      return next;
+    });
+  }
+
+  async function tagOne(target, tag) {
+    const clean = tag.trim();
+    if (!clean) return;
+    try {
+      await api('/api/admin/viewers-bulk', {
+        method: 'POST',
+        body: { action: 'add-tag', emails: [target], tag: clean },
+      });
+      setRowTagInputs((prev) => ({ ...prev, [target]: '' }));
+      reload();
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
+  async function untagOne(target, tag) {
+    try {
+      await api('/api/admin/viewers-bulk', {
+        method: 'POST',
+        body: { action: 'remove-tag', emails: [target], tag },
+      });
+      reload();
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
+  async function runBulkTag(action) {
+    const clean = bulkTag.trim();
+    if (!clean || selected.size === 0) return;
+    setBulkTagBusy(true);
+    setStatus('');
+    try {
+      const data = await api('/api/admin/viewers-bulk', {
+        method: 'POST',
+        body: { action, emails: [...selected], tag: clean },
+      });
+      const okCount = data.results.filter((r) => r.ok).length;
+      setStatus(`${action === 'add-tag' ? 'Tagged' : 'Untagged'} ${okCount}/${selected.size}.`);
+      reload();
+    } catch (err) {
+      setStatus(err.message);
+    } finally {
+      setBulkTagBusy(false);
+    }
   }
 
   return (
@@ -1156,12 +1301,97 @@ function ViewersTab({ viewers, reload }) {
         {status ? <p className="muted">{status}</p> : null}
       </div>
 
+      {availableTags.length > 0 ? (
+        <div className="field-row">
+          <label className="field-inline">
+            Filter by tag
+            <select className="select" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}>
+              <option value="">All viewers</option>
+              {availableTags.map((tag) => (
+                <option key={tag} value={tag}>
+                  {tag}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      ) : null}
+
+      {selected.size > 0 ? (
+        <div className="bulk-toolbar card card-pad">
+          <span>{selected.size} selected</span>
+          <input
+            className="input input-narrow"
+            placeholder="Tag name, e.g. Team A"
+            value={bulkTag}
+            onChange={(e) => setBulkTag(e.target.value)}
+          />
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            disabled={bulkTagBusy || !bulkTag.trim()}
+            onClick={() => runBulkTag('add-tag')}
+          >
+            Tag selected
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={bulkTagBusy || !bulkTag.trim()}
+            onClick={() => runBulkTag('remove-tag')}
+          >
+            Untag selected
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSelected(new Set())}>
+            Clear
+          </button>
+        </div>
+      ) : null}
+
       <div className="admin-rows">
-        {viewers.map((v) => (
+        {shown.map((v) => (
           <div key={v.email} className="admin-row card">
+            <input
+              type="checkbox"
+              checked={selected.has(v.email)}
+              onChange={() => toggleSelect(v.email)}
+              aria-label={`Select ${v.email}`}
+            />
             <div className="row-main">
               <span className="row-title">{v.email}</span>
               <span className="row-meta muted">Last seen: {fmtWhen(v.lastSeen)}</span>
+              <div className="chips">
+                {(v.tags || []).map((tag) => (
+                  <span key={tag} className="chip">
+                    {tag}
+                    <button
+                      type="button"
+                      className="btn-icon"
+                      title={`Remove tag "${tag}"`}
+                      onClick={() => untagOne(v.email, tag)}
+                    >
+                      <XIcon width={12} height={12} />
+                    </button>
+                  </span>
+                ))}
+                <form
+                  className="inline-form"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    tagOne(v.email, rowTagInputs[v.email] || '');
+                  }}
+                >
+                  <input
+                    className="input input-narrow"
+                    placeholder="+ tag"
+                    value={rowTagInputs[v.email] || ''}
+                    onChange={(e) =>
+                      setRowTagInputs((prev) => ({ ...prev, [v.email]: e.target.value }))
+                    }
+                    aria-label={`Add tag to ${v.email}`}
+                  />
+                </form>
+              </div>
             </div>
             <button
               type="button"
@@ -1172,7 +1402,7 @@ function ViewersTab({ viewers, reload }) {
             </button>
           </div>
         ))}
-        {viewers.length === 0 ? <p className="empty">No approved viewers yet.</p> : null}
+        {shown.length === 0 ? <p className="empty">No approved viewers{tagFilter ? ` tagged "${tagFilter}"` : ' yet'}.</p> : null}
       </div>
     </div>
   );

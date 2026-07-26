@@ -2,6 +2,7 @@ import { requireAdmin } from '../../../lib/guard';
 import { redis, k } from '../../../lib/redis';
 import { normalizeEmail, isValidEmail } from '../../../lib/auth';
 import { logAction } from '../../../lib/audit';
+import { getAllViewerTags, distinctTags, clearViewerTags } from '../../../lib/viewerTags';
 
 export default async function handler(req, res) {
   const admin = await requireAdmin(req, res);
@@ -10,14 +11,19 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
     try {
-      const [emails, lastSeen] = await Promise.all([
+      const [emails, lastSeen, tagsByEmail] = await Promise.all([
         r.smembers(k('viewers')),
         r.hgetall(k('viewer:lastseen')).catch(() => ({})),
+        getAllViewerTags(),
       ]);
       const viewers = (emails || [])
-        .map((email) => ({ email, lastSeen: (lastSeen || {})[email] || null }))
+        .map((email) => ({
+          email,
+          lastSeen: (lastSeen || {})[email] || null,
+          tags: tagsByEmail[email] || [],
+        }))
         .sort((a, b) => a.email.localeCompare(b.email));
-      return res.json({ viewers });
+      return res.json({ viewers, tags: distinctTags(tagsByEmail) });
     } catch {
       return res.status(500).json({ error: 'Could not load viewers' });
     }
@@ -60,6 +66,7 @@ export default async function handler(req, res) {
     try {
       await r.srem(k('viewers'), email);
       await r.hdel(k('viewer:lastseen'), email).catch(() => {});
+      await clearViewerTags(email);
       await logAction(admin, 'viewer.remove', email);
       return res.json({ ok: true });
     } catch {
