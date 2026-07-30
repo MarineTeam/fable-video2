@@ -1,8 +1,9 @@
+import { withMonitorApi } from "../../../lib/monitor";
 import { requireAdmin } from '../../../lib/guard';
 import { pushEnabled, sendToAll } from '../../../lib/push';
 import { logAction } from '../../../lib/audit';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const admin = await requireAdmin(req, res);
   if (!admin) return;
@@ -16,3 +17,5 @@ export default async function handler(req, res) {
   await logAction(admin, 'push.broadcast', `"${title}" → ${result.sent} devices`);
   res.json(result);
 }
+
+export default withMonitorApi(handler);

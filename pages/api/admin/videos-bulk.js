@@ -1,3 +1,4 @@
+import { withMonitorApi } from "../../../lib/monitor";
 import { requireAdmin } from '../../../lib/guard';
 import { allowRequest } from '../../../lib/ratelimit';
 import { logAction } from '../../../lib/audit';
@@ -10,7 +11,7 @@ const MAX_IDS = 50;
 // Multi-select bulk action over existing videos, mirroring shares-bulk.js:
 // every id is processed independently — one bad/missing video never aborts
 // the rest of the batch.
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const admin = await requireAdmin(req, res);
   if (!admin) return;
@@ -56,3 +57,5 @@ export default async function handler(req, res) {
 
   res.json({ results });
 }
+
+export default withMonitorApi(handler);

@@ -1,10 +1,11 @@
+import { withMonitorApi } from "../../../lib/monitor";
 import { requireAdmin } from '../../../lib/guard';
 import { redis, k } from '../../../lib/redis';
 import { normalizeEmail, isValidEmail } from '../../../lib/auth';
 import { logAction } from '../../../lib/audit';
 import { getAllViewerTags, distinctTags, clearViewerTags } from '../../../lib/viewerTags';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   const admin = await requireAdmin(req, res);
   if (!admin) return;
   const r = redis();
@@ -76,3 +77,5 @@ export default async function handler(req, res) {
 
   res.status(405).json({ error: 'Method not allowed' });
 }
+
+export default withMonitorApi(handler);

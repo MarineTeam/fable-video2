@@ -7,8 +7,9 @@ import { getVideo, signedEmbedUrl } from '../../lib/bunny';
 import { isShareActive } from '../../lib/share';
 import { resolveWatermark, isExempt, getVideoMode, getGlobalDefault } from '../../lib/watermark';
 import { isGeoAllowed } from '../../lib/geo';
+import { withMonitorPage } from '../../lib/monitor';
 
-export async function getServerSideProps({ req, res, params }) {
+async function gssp({ req, res, params }) {
   const id = String(params.id || '');
   if (!/^[A-Za-z0-9_-]{8,64}$/.test(id)) {
     return { props: { state: 'gone' } };
@@ -92,6 +93,8 @@ export async function getServerSideProps({ req, res, params }) {
     },
   };
 }
+
+export const getServerSideProps = withMonitorPage(gssp);
 
 export default function Share({ state, user, title, embedUrl, videoId, expiresAt, shareId, watermark }) {
   if (state === 'gone') {

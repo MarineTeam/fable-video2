@@ -1,10 +1,11 @@
+import { withMonitorApi } from "../../../lib/monitor";
 import { requireAdmin } from '../../../lib/guard';
 import { listVideos, getStatistics } from '../../../lib/bunny';
 
 // Views / watch time / most-watched from bunny.net video stats + the
 // statistics API. Every sub-fetch is best-effort so a partial outage still
 // renders a dashboard.
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
   const admin = await requireAdmin(req, res);
   if (!admin) return;
@@ -50,3 +51,5 @@ export default async function handler(req, res) {
     top,
   });
 }
+
+export default withMonitorApi(handler);

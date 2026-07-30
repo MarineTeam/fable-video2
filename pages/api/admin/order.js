@@ -1,8 +1,9 @@
+import { withMonitorApi } from "../../../lib/monitor";
 import { requireAdmin } from '../../../lib/guard';
 import { redis, k } from '../../../lib/redis';
 import { logAction } from '../../../lib/audit';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const admin = await requireAdmin(req, res);
   if (!admin) return;
@@ -23,3 +24,5 @@ export default async function handler(req, res) {
     res.status(500).json({ error: 'Could not save order' });
   }
 }
+
+export default withMonitorApi(handler);

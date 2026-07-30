@@ -1,3 +1,4 @@
+import { withMonitorApi } from "../../../lib/monitor";
 import { requireAdmin } from '../../../lib/guard';
 import { logAction } from '../../../lib/audit';
 import { pruneGoneShares } from '../../../lib/share';
@@ -10,7 +11,7 @@ import { cleanupStaleBundles } from '../../../lib/bundle';
 // zero live members long before its own TTL catches up). Nothing here is a
 // correctness fix — both indexes already self-heal on normal reads — this
 // just lets an admin reclaim the space on demand instead of waiting.
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const admin = await requireAdmin(req, res);
   if (!admin) return;
@@ -27,3 +28,5 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'Cleanup failed' });
   }
 }
+
+export default withMonitorApi(handler);

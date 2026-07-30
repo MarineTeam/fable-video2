@@ -4,13 +4,14 @@ import { isAdmin, normalizeEmail } from '../../lib/auth';
 import { baseUrl } from '../../lib/share';
 import { loadBundle, liveBundleItems } from '../../lib/bundle';
 import { isGeoAllowed } from '../../lib/geo';
+import { withMonitorPage } from '../../lib/monitor';
 
 // Consolidated listing for a recipient with multiple active shares. Gated
 // exactly like an individual /s/[id] link: sign in as the bundle's email and
 // the same session unlocks this page AND every individual share addressed
 // to that email (Auth0's session cookie already applies site-wide — there is
 // no separate per-item re-verification to design around).
-export async function getServerSideProps({ req, res, params }) {
+async function gssp({ req, res, params }) {
   const id = String(params.id || '');
   if (!/^[A-Za-z0-9_-]{8,64}$/.test(id)) {
     return { props: { state: 'gone' } };
@@ -45,6 +46,8 @@ export async function getServerSideProps({ req, res, params }) {
 
   return { props: { state: 'ok', user, items } };
 }
+
+export const getServerSideProps = withMonitorPage(gssp);
 
 export default function Bundle({ state, user, items }) {
   if (state === 'gone') {

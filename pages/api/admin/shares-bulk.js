@@ -1,3 +1,4 @@
+import { withMonitorApi } from "../../../lib/monitor";
 import { requireAdmin } from '../../../lib/guard';
 import { allowRequest } from '../../../lib/ratelimit';
 import { logAction } from '../../../lib/audit';
@@ -12,7 +13,7 @@ const MAX_IDS = 200;
 // Each action below starts with a single batched Redis fetch (MGET) for the
 // whole selection instead of one GET per id — see lib/share.js/lib/bundle.js
 // for why that's the difference between O(1) and O(selection size) commands.
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const admin = await requireAdmin(req, res);
   if (!admin) return;
@@ -48,3 +49,5 @@ export default async function handler(req, res) {
 
   res.json({ results });
 }
+
+export default withMonitorApi(handler);

@@ -1,3 +1,4 @@
+import { withMonitorApi } from "../../lib/monitor";
 import { auth0 } from '../../lib/auth0';
 import { normalizeEmail } from '../../lib/auth';
 import { allowRequest } from '../../lib/ratelimit';
@@ -6,7 +7,7 @@ import { isShareActive } from '../../lib/share';
 
 // Real playback signal for a share link, reported by the player itself
 // (play / progress / ended) rather than inferred from page loads.
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const session = await auth0.getSession(req, res);
   if (!session) return res.status(401).json({ error: 'Not signed in' });
@@ -57,3 +58,5 @@ export default async function handler(req, res) {
   } catch {}
   res.json({ ok: true });
 }
+
+export default withMonitorApi(handler);

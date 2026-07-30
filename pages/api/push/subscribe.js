@@ -1,8 +1,9 @@
+import { withMonitorApi } from "../../../lib/monitor";
 import { requireViewer } from '../../../lib/guard';
 import { redis, k } from '../../../lib/redis';
 import { pushEnabled } from '../../../lib/push';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   if (!pushEnabled()) return res.status(400).json({ error: 'Push not configured' });
   const viewer = await requireViewer(req, res);
@@ -26,3 +27,5 @@ export default async function handler(req, res) {
     res.status(500).json({ error: 'Could not save subscription' });
   }
 }
+
+export default withMonitorApi(handler);
