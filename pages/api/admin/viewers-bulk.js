@@ -1,3 +1,4 @@
+import { withMonitorApi } from "../../../lib/monitor";
 import { requireAdmin } from '../../../lib/guard';
 import { allowRequest } from '../../../lib/ratelimit';
 import { logAction } from '../../../lib/audit';
@@ -10,7 +11,7 @@ const MAX_EMAILS = 500;
 // shares-bulk.js: every email is processed independently, one bad email
 // never aborts the rest of the batch. Also doubles as the single-viewer
 // tag editor — the admin UI just calls it with a one-email selection.
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const admin = await requireAdmin(req, res);
   if (!admin) return;
@@ -47,3 +48,5 @@ export default async function handler(req, res) {
 
   res.json({ results });
 }
+
+export default withMonitorApi(handler);

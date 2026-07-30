@@ -1,7 +1,8 @@
+import { withMonitorApi } from "../../lib/monitor";
 import { requireViewer } from '../../lib/guard';
 import { listCollections } from '../../lib/bunny';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
   const viewer = await requireViewer(req, res);
   if (!viewer) return;
@@ -15,3 +16,5 @@ export default async function handler(req, res) {
     res.json({ collections: [] });
   }
 }
+
+export default withMonitorApi(handler);

@@ -6,8 +6,9 @@ import { auth0 } from '../lib/auth0';
 import { isAdmin, normalizeEmail } from '../lib/auth';
 import { redis, k } from '../lib/redis';
 import { isGeoAllowed } from '../lib/geo';
+import { withMonitorPage } from '../lib/monitor';
 
-export async function getServerSideProps({ req, res }) {
+async function gssp({ req, res }) {
   const session = await auth0.getSession(req, res);
   if (!session) {
     return { redirect: { destination: '/auth/login?returnTo=/', permanent: false } };
@@ -39,6 +40,8 @@ export async function getServerSideProps({ req, res }) {
     },
   };
 }
+
+export const getServerSideProps = withMonitorPage(gssp);
 
 function fmtDuration(seconds) {
   const s = Math.max(0, Math.floor(seconds || 0));

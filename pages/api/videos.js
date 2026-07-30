@@ -1,3 +1,4 @@
+import { withMonitorApi } from "../../lib/monitor";
 import { requireViewer } from '../../lib/guard';
 import { allowRequest } from '../../lib/ratelimit';
 import { listVideos, thumbnailUrl, isPlayable } from '../../lib/bunny';
@@ -6,7 +7,7 @@ import { applyOrder } from '../../lib/order';
 
 const PAGE_SIZE = 10;
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
   const viewer = await requireViewer(req, res);
   if (!viewer) return;
@@ -49,3 +50,5 @@ export default async function handler(req, res) {
     res.status(502).json({ error: 'Video service unavailable' });
   }
 }
+
+export default withMonitorApi(handler);

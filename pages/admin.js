@@ -17,9 +17,11 @@ import { isAdmin, normalizeEmail } from '../lib/auth';
 import { PRESETS, COLOR_KEYS, applyTheme, validateTheme, THEME_STORAGE_KEY } from '../lib/theme';
 import { rollupSharesByVideo } from '../lib/videoAnalytics';
 import { isGeoAllowed } from '../lib/geo';
+import { withMonitorPage } from '../lib/monitor';
+import { resetMonitorCalls } from '../lib/monitorClient';
 
 // Server-side gate: non-admins are redirected before any admin UI is sent.
-export async function getServerSideProps({ req, res }) {
+async function gssp({ req, res }) {
   const session = await auth0.getSession(req, res);
   if (!session) {
     return { redirect: { destination: '/auth/login?returnTo=/admin', permanent: false } };
@@ -39,6 +41,8 @@ export async function getServerSideProps({ req, res }) {
     },
   };
 }
+
+export const getServerSideProps = withMonitorPage(gssp);
 
 async function api(path, { method = 'GET', body } = {}) {
   const res = await fetch(path, {
@@ -71,6 +75,14 @@ const TABS = ['Videos', 'Viewers', 'Shares', 'Settings', 'Activity', 'Analytics'
 
 export default function Admin({ user, mailOn, pushOn }) {
   const [tab, setTab] = useState('Videos');
+  // The tabs below are pure React state, not routes — switching tabs fires
+  // no navigation event, so the Query Monitor's per-view call log wouldn't
+  // otherwise reset here. Without this, a tab that lazily fetches its own
+  // data would show the previous tab's calls too, and a tab whose data
+  // loaded once upfront would look frozen forever.
+  useEffect(() => {
+    resetMonitorCalls();
+  }, [tab]);
   const [videos, setVideos] = useState([]);
   const [collections, setCollections] = useState([]);
   const [viewers, setViewers] = useState([]);

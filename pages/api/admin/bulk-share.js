@@ -1,3 +1,4 @@
+import { withMonitorApi } from "../../../lib/monitor";
 import { requireAdmin } from '../../../lib/guard';
 import { allowRequest } from '../../../lib/ratelimit';
 import { normalizeEmail, isValidEmail } from '../../../lib/auth';
@@ -14,7 +15,7 @@ const MAX_PAIRS = 300; // videos x recipients per request
 // recipient gets one notification — a plain single-link email for a genuine
 // first share, or a consolidated bundle email once they have 2+ active
 // shares (see lib/bundle.js afterShareCreated).
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const admin = await requireAdmin(req, res);
   if (!admin) return;
@@ -108,3 +109,5 @@ export default async function handler(req, res) {
     })),
   });
 }
+
+export default withMonitorApi(handler);

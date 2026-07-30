@@ -1,3 +1,4 @@
+import { withMonitorApi } from "../../lib/monitor";
 import { requireAdmin } from '../../lib/guard';
 import { redis, k } from '../../lib/redis';
 import { DEFAULT_THEME, validateTheme } from '../../lib/theme';
@@ -5,7 +6,7 @@ import { logAction } from '../../lib/audit';
 
 // GET is public (the palette applies to the login-facing shell too and leaks
 // nothing but colors). POST is admin-only.
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method === 'GET') {
     try {
       const stored = await redis().get(k('theme'));
@@ -32,3 +33,5 @@ export default async function handler(req, res) {
 
   res.status(405).json({ error: 'Method not allowed' });
 }
+
+export default withMonitorApi(handler);

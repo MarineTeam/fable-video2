@@ -8,8 +8,9 @@ import { redis, k } from '../../lib/redis';
 import { getVideo, signedEmbedUrl } from '../../lib/bunny';
 import { resolveWatermark, isExempt, getVideoMode, getGlobalDefault } from '../../lib/watermark';
 import { isGeoAllowed } from '../../lib/geo';
+import { withMonitorPage } from '../../lib/monitor';
 
-export async function getServerSideProps({ req, res, params }) {
+async function gssp({ req, res, params }) {
   const id = String(params.id || '');
   if (!/^[0-9a-f-]{10,64}$/i.test(id)) return { notFound: true };
 
@@ -83,6 +84,8 @@ export async function getServerSideProps({ req, res, params }) {
     },
   };
 }
+
+export const getServerSideProps = withMonitorPage(gssp);
 
 export default function Watch({ user, isAdmin: admin, video, embedUrl, initialTime, watermark }) {
   return (

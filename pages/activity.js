@@ -3,9 +3,10 @@ import AppShell from '../components/AppShell';
 import { auth0 } from '../lib/auth0';
 import { isAdmin, normalizeEmail } from '../lib/auth';
 import { redis, k } from '../lib/redis';
+import { withMonitorPage } from '../lib/monitor';
 
 // Server-side gate mirrors pages/index.js: approved viewer or admin only.
-export async function getServerSideProps({ req, res }) {
+async function gssp({ req, res }) {
   const session = await auth0.getSession(req, res);
   if (!session) {
     return { redirect: { destination: '/auth/login?returnTo=/activity', permanent: false } };
@@ -28,6 +29,8 @@ export async function getServerSideProps({ req, res }) {
     },
   };
 }
+
+export const getServerSideProps = withMonitorPage(gssp);
 
 async function api(path) {
   const res = await fetch(path);

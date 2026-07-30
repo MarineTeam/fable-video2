@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import Head from 'next/head';
 import IdleTimeout from '../components/IdleTimeout';
+import QueryMonitor from '../components/QueryMonitor';
 import { applyTheme, validateTheme, THEME_STORAGE_KEY } from '../lib/theme';
 import '../styles/globals.css';
 
@@ -33,6 +34,7 @@ export default function App({ Component, pageProps }) {
       </Head>
       {pageProps.user ? <IdleTimeout /> : null}
       <Component {...pageProps} />
+      {pageProps.user ? <QueryMonitor ssrStats={pageProps._monitor} /> : null}
     </>
   );
 }

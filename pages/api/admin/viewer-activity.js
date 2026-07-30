@@ -1,3 +1,4 @@
+import { withMonitorApi } from "../../../lib/monitor";
 import { requireAdmin } from '../../../lib/guard';
 import { redis, k } from '../../../lib/redis';
 import { normalizeEmail } from '../../../lib/auth';
@@ -7,7 +8,7 @@ const MAX_ITEMS = 30;
 // Admin lookup of any approved viewer's watch history — reads the same
 // progress:<email> hash as /api/progress, just for an email the admin picks
 // rather than the caller's own session.
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
   const admin = await requireAdmin(req, res);
   if (!admin) return;
@@ -43,3 +44,5 @@ function safeParse(s) {
     return null;
   }
 }
+
+export default withMonitorApi(handler);

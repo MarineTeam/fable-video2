@@ -1,10 +1,11 @@
+import { withMonitorApi } from "../../lib/monitor";
 import { requireViewer } from '../../lib/guard';
 import { redis, k } from '../../lib/redis';
 
 const MAX_ITEMS = 30;
 
 // Per-viewer playback progress / watch history, keyed by email.
-export default async function handler(req, res) {
+async function handler(req, res) {
   const viewer = await requireViewer(req, res);
   if (!viewer) return;
   const key = k(`progress:${viewer.email}`);
@@ -63,3 +64,5 @@ function safeParse(s) {
     return null;
   }
 }
+
+export default withMonitorApi(handler);

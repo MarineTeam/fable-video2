@@ -1,3 +1,4 @@
+import { withMonitorApi } from "../../../lib/monitor";
 import { requireAdmin } from '../../../lib/guard';
 import {
   listVideos,
@@ -11,7 +12,7 @@ import { announceNewVideos } from '../../../lib/push';
 import { logAction } from '../../../lib/audit';
 import { getVideoModes, setVideoMode, clampWatermarkMode } from '../../../lib/watermark';
 
-export default async function handler(req, res) {
+async function handler(req, res) {
   const admin = await requireAdmin(req, res);
   if (!admin) return;
   const r = redis();
@@ -92,3 +93,5 @@ export default async function handler(req, res) {
 
   res.status(405).json({ error: 'Method not allowed' });
 }
+
+export default withMonitorApi(handler);

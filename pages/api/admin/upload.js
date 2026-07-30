@@ -1,3 +1,4 @@
+import { withMonitorApi } from "../../../lib/monitor";
 import { requireAdmin } from '../../../lib/guard';
 import { allowRequest } from '../../../lib/ratelimit';
 import { createVideo, tusAuth } from '../../../lib/bunny';
@@ -6,7 +7,7 @@ import { logAction } from '../../../lib/audit';
 // Creates the Bunny video record and returns a server-signed TUS ticket.
 // The browser then streams the file straight to bunny.net — no video bytes
 // ever touch this server, and the API key stays here.
-export default async function handler(req, res) {
+async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const admin = await requireAdmin(req, res);
   if (!admin) return;
@@ -27,3 +28,5 @@ export default async function handler(req, res) {
     res.status(502).json({ error: 'Could not create video' });
   }
 }
+
+export default withMonitorApi(handler);
