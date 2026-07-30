@@ -3,6 +3,81 @@
 All notable changes to the Marine Video Portal. Dates are UTC, matching the
 commit history (`git log --oneline`).
 
+## 2026-07-30 — Query Monitor performance panel
+
+- **Opt-in performance widget** for signed-in users, gated entirely behind a
+  new server-side `QUERY_MONITOR_ENABLED` env var — inert (no instrumentation
+  overhead, `/api/monitor` 404s) unless explicitly turned on.
+- Shows Redis query count/time, outbound bunny.net/Resend/web-push call
+  count/time, SSR cost, client render time, process memory/uptime, and a
+  per-request breakdown.
+- `lib/monitor.js` (`AsyncLocalStorage`-based per-request store),
+  `lib/redis.js` (transparent timing `Proxy` around the Redis client, so
+  every existing call site is instrumented with no edits), `lib/monitorClient.js`
+  (browser-safe call log installed at module-evaluation time so it can't race
+  other components' data-fetching effects), and `components/QueryMonitor.js`
+  (the widget, mounted in `_app.js`). All API routes wrapped with
+  `withMonitorApi`, all `getServerSideProps` pages wrapped with `withMonitorPage`.
+
+## 2026-07-26 — Multiple recipients per Share, add-by-tag, and viewer tags/groups
+
+- **Regular Share now accepts multiple recipients** in one submission (was
+  previously one email per Share, unlike Bulk Share) — each recipient still
+  gets their own independently-revocable share link.
+- **`components/EmailTagInput.js`** — a reusable multi-email entry control
+  (type or paste, comma/space/newline-separated, each becomes a removable
+  chip), used in both the Share form and the Private list panel.
+- **Viewer tags/groups** — approved viewers can be tagged (e.g. "Team A") for
+  bulk edit and quick recipient lookup (`lib/viewerTags.js`, new
+  `fable2:viewer:tags` hash). The Viewers tab gets inline tag chips,
+  multi-select bulk tagging, and a filter-by-tag dropdown; both Share and
+  Bulk Share forms gain an "add viewers by tag" picker to target a group
+  instead of pasting emails.
+- **Collections get a "Share" button** that pre-selects every video in the
+  collection and opens the existing bulk-share flow — no new backend needed.
+
+## 2026-07-25/26 — Private list: persistent per-video invite management
+
+- **Private list** — each video gets a "Private list" button opening a
+  persistent, editable invite list, distinct from one-off Share/Bulk Share
+  links. Adding an email creates a share (and optionally notifies) only for
+  recipients not already tracked by the list; removing one revokes exactly
+  the share the list itself created.
+- Tracked as its own Redis hash per video (`lib/privateList.js`, email →
+  the shareId it created) rather than derived by filtering the Shares tab's
+  data — the earlier filter-based approach let a regular Share to the same
+  video+email get miscounted as "already on the list," and removing that
+  entry could revoke a share the list never created. A tracked entry whose
+  share was later revoked/expired by other means self-heals on next read.
+- Shares created via the Private list are tagged `viaPrivateList: true` and
+  shown with a "via Private list" marker in the Shares tab, so it's clear
+  which row is which.
+- Fixed a bug where the list read `share.id` off a value that never carried
+  it, causing every add to track `email → undefined` and clobber a single
+  shared `fable2:share:undefined` Redis key across *all* videos — the root
+  cause of Private-list state appearing to leak between unrelated videos.
+  Caught and now guarded by an end-to-end test against a fake in-memory
+  Redis (`lib/__tests__/privateList.test.js`).
+
+## 2026-07-24 — Fix geo enforcement toggle never persisting across reload
+
+- `settingOn()` compared a stored Redis value to the string `'1'`, but
+  Upstash's REST client auto-deserializes JSON-looking strings, so a stored
+  `'1'` came back as the number `1` — the strict comparison always failed.
+  `geoEnforcementOn()`/`adminGeoEnforcementOn()` read back `false` right
+  after being saved as `true`, so the enforcement checkbox reverted on
+  reload and neither geo whitelist ever actually gated anything.
+
+## 2026-07-23 — Garbage-collect stale shares and bundles
+
+- Bundles now index their ids in a `bundles` Redis SET, mirroring the
+  existing `shares` SET. A new `POST /api/admin/cleanup` route sweeps both
+  indexes: shares whose record is finally gone past its grace window, and
+  bundles whose every member share has since expired or been revoked (a
+  bundle's `expiresAt` only ever moves forward, so an emptied bundle could
+  otherwise sit around long after its last live item is gone). Exposed as a
+  "Clean up stale items" action on the admin Shares tab.
+
 ## 2026-07-23 — Share/bundle Redis commands stay O(1) as share count grows
 
 - **Batched share reads.** `lib/share.js` adds `loadShares(ids)`, a single
