@@ -1,6 +1,6 @@
 # Marine Video Portal — Features
 
-Current as of **v2.3.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped by area; items marked _(admin)_ live in the `/admin` panel.
+Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped by area; items marked _(admin)_ live in the `/admin` panel.
 
 ## Authentication & access control
 - Login required for every page via Auth0 (v4 SDK; `/auth/*` routes mounted by middleware).
@@ -106,7 +106,9 @@ Current as of **v2.3.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - Share expiry is a logical field (`expiresAt`), not raw Redis TTL — a link's own Redis record actually outlives its expiry by a 60-day grace window so an already-lapsed-but-not-revoked link can still be **extended**. All read paths (the share page, playback events, the bundle page) check `expiresAt`/`revokedAt` explicitly rather than relying on the record simply being gone.
 - **Opt-in Sentry error monitoring** — modern instrumentation-file setup (client/server/edge); inert until `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` are set.
 - **CI pipeline** — GitHub Actions runs lint + tests + build on every push/PR to `main`, catching breakage before Vercel deploys.
-- **Smoke tests** — Vitest coverage for the auth check, video-ordering logic, theme helpers, push logic, share/bundle logic, watermark precedence, and the per-video analytics rollup.
+- **Smoke tests** — Vitest coverage for the auth check, video-ordering logic, theme helpers, push logic, share/bundle logic, watermark precedence, the per-video analytics rollup, and the Private list isolation guarantee.
+- **Query Monitor performance panel** — an opt-in floating widget, visible to signed-in users, showing Redis query count/time, outbound bunny.net/Resend/web-push call count/time, SSR cost, client render time, and process memory/uptime, with a per-request breakdown on click. Gated entirely behind `QUERY_MONITOR_ENABLED` (see Configuration knobs below); off by default with no instrumentation overhead.
+- **Clean up stale items** _(admin, Shares tab)_ — sweeps shares whose record has aged past its grace window and bundles whose every member share has since expired or been revoked, so an emptied bundle doesn't sit around indefinitely after its last live item is gone.
 
 ## Configuration knobs (environment)
 - `BUNNY_CDN_HOSTNAME` — enables thumbnails.
@@ -116,6 +118,7 @@ Current as of **v2.3.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - `RESEND_API_KEY` — enable emailing/resending share links via Resend. `MAIL_FROM` optionally sets the from address (a Resend-verified sender; defaults to `onboarding@resend.dev`).
 - `GEO_WHITELIST` / `ADMIN_GEO_WHITELIST` — comma-separated ISO country codes for the viewer / admin geo whitelists (see Authentication & access control above). Each only takes effect once its enforcement toggle is turned on in `/admin` → Settings; off and inert by default.
 - `ADMIN_GEO_BYPASS_EMAILS` — comma-separated admin emails that always skip the admin geo check, regardless of country or the enforcement toggle. A standing safety net armed ahead of travel, not an in-the-moment fix — env var changes need a redeploy. Empty/unset by default.
+- `QUERY_MONITOR_ENABLED` — enables the Query Monitor performance panel for signed-in users (see Platform, quality & observability above). Unset or off by default.
 
 ## Known gaps / not yet implemented
 - **Access-request flow** — no self-serve way for unapproved users to request access; admins must know who to add.
