@@ -4,6 +4,7 @@ import { allowRequest } from '../../lib/ratelimit';
 import { listVideos, thumbnailUrl, isPlayable } from '../../lib/bunny';
 import { redis, k } from '../../lib/redis';
 import { applyOrder } from '../../lib/order';
+import { contentScopeFor, filterVideosByScope } from '../../lib/groups';
 
 const PAGE_SIZE = 10;
 
@@ -20,16 +21,21 @@ async function handler(req, res) {
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);
 
   const r = redis();
-  const [countRaw, orderRaw] = await Promise.all([
+  // Group content scope. Inert (always "unrestricted") unless
+  // GROUP_CONTENT_GATING=1, and always unrestricted for staff — see
+  // lib/groups.js. This is one of the three enforcement points that have to
+  // agree; the others are /api/collections and the /watch/[id] GSSP.
+  const [countRaw, orderRaw, scope] = await Promise.all([
     r.get(k('settings:homeCount')).catch(() => null),
     r.get(k('order')).catch(() => null),
+    contentScopeFor(viewer.email, { staff: viewer.admin || viewer.staff }),
   ]);
   const homeCount = Math.min(Math.max(parseInt(countRaw, 10) || 48, 1), 200);
   const order = Array.isArray(orderRaw) ? orderRaw : [];
 
   try {
     const data = await listVideos({ page: 1, perPage: Math.min(homeCount, 100), search, collection });
-    const playable = (data?.items || []).filter(isPlayable);
+    const playable = filterVideosByScope((data?.items || []).filter(isPlayable), scope);
     const capped = applyOrder(playable, order).slice(0, homeCount);
 
     const start = (page - 1) * PAGE_SIZE;

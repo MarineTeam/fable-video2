@@ -1,30 +1,32 @@
 import { useEffect, useState } from 'react';
 import AppShell from '../components/AppShell';
 import { auth0 } from '../lib/auth0';
-import { isAdmin, normalizeEmail } from '../lib/auth';
-import { redis, k } from '../lib/redis';
+import { normalizeEmail } from '../lib/auth';
+import { viewerAccessFor } from '../lib/guard';
+import { CAP } from '../lib/capabilities';
 import { withMonitorPage } from '../lib/monitor';
 
-// Server-side gate mirrors pages/index.js: approved viewer or admin only.
+// Server-side gate mirrors pages/index.js: approved viewer or staff only —
+// via the same shared helper, so a role-holder is never told "not approved"
+// here while being approved everywhere else.
 async function gssp({ req, res }) {
   const session = await auth0.getSession(req, res);
   if (!session) {
     return { redirect: { destination: '/auth/login?returnTo=/activity', permanent: false } };
   }
   const email = normalizeEmail(session.user.email);
-  const admin = isAdmin(email);
-  let approved = admin;
-  if (!approved) {
-    try {
-      approved = (await redis().sismember(k('viewers'), email)) === 1;
-    } catch {
-      approved = false;
-    }
-  }
+  const { approved, owner, staff, capabilities } = await viewerAccessFor(email);
+  // The lookup dropdown needs BOTH underlying routes, so it is offered only to
+  // someone who holds both capabilities — otherwise it renders a control that
+  // is guaranteed to 403 on use.
+  const canLookUpOthers =
+    owner ||
+    (capabilities.includes(CAP.VIEWERS_READ) && capabilities.includes(CAP.ANALYTICS_READ));
   return {
     props: {
       user: { email, name: session.user.name || email },
-      isAdmin: admin,
+      isAdmin: owner || staff,
+      canLookUpOthers,
       approved,
     },
   };
@@ -56,18 +58,18 @@ function fmtWhen(iso) {
   return d.toLocaleString();
 }
 
-export default function Activity({ user, isAdmin: admin, approved }) {
+export default function Activity({ user, isAdmin: admin, canLookUpOthers, approved }) {
   const [viewers, setViewers] = useState([]);
   const [selected, setSelected] = useState('__me__');
   const [items, setItems] = useState(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (!admin) return;
+    if (!canLookUpOthers) return;
     api('/api/admin/viewers')
       .then((d) => setViewers(d.viewers || []))
       .catch(() => {});
-  }, [admin]);
+  }, [canLookUpOthers]);
 
   useEffect(() => {
     if (!approved) return;
@@ -97,7 +99,7 @@ export default function Activity({ user, isAdmin: admin, approved }) {
     <AppShell user={user} isAdmin={admin} approved>
       <h1>{selected === '__me__' ? 'My activity' : `Activity — ${selected}`}</h1>
 
-      {admin ? (
+      {canLookUpOthers ? (
         <label className="field-inline">
           Viewer
           <select className="select" value={selected} onChange={(e) => setSelected(e.target.value)}>

@@ -1,5 +1,6 @@
 import { withMonitorApi } from "../../../lib/monitor";
-import { requireAdmin } from '../../../lib/guard';
+import { requireCapability } from '../../../lib/guard';
+import { CAP } from '../../../lib/capabilities';
 import { redis, k } from '../../../lib/redis';
 import { normalizeEmail } from '../../../lib/auth';
 
@@ -10,7 +11,7 @@ const MAX_ITEMS = 30;
 // rather than the caller's own session.
 async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
-  const admin = await requireAdmin(req, res);
+  const admin = await requireCapability(req, res, CAP.ANALYTICS_READ);
   if (!admin) return;
 
   const email = normalizeEmail(req.query.email);

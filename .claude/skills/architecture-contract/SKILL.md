@@ -12,9 +12,15 @@ re-verify with the commands in "Provenance and maintenance" before trusting it.
 Vocabulary (used throughout, defined once):
 
 - **Viewer** — an email address in the Redis SET `fable2:viewers`, added by an admin.
-- **Admin** — an email address in the `ADMIN_EMAILS` env var (comma-separated).
-- **Guard** — one of `requireAdmin` / `requireViewer` in `lib/guard.js`; an API
-  route calls it first and returns immediately if it yields null.
+- **Owner** (was "Admin") — an email address in the `ADMIN_EMAILS` env var
+  (comma-separated). Holds every capability, always, resolved without Redis.
+- **Capability** — one of the 13 strings in `lib/capabilities.js`'s catalog
+  (e.g. `videos.upload`, `shares.manage`); each names a real enforcement point.
+- **Role** — an admin-defined, Redis-stored named set of capabilities, assigned
+  per email. **Staff** = an owner or anyone holding ≥ 1 capability.
+- **Guard** — one of `requireCapability` / `requireViewer` in `lib/guard.js`; an
+  API route calls it first and returns immediately if it yields null.
+  (`requireAdmin` was removed 2026-08-30 — every admin route names a capability.)
 - **Bunny** — bunny.net Stream, the video storage/encoding/CDN vendor.
 - **Signed URL / ticket** — a URL or header set containing a SHA-256 token
   computed server-side from a secret key + an expiry timestamp.
@@ -29,16 +35,33 @@ Do not "improve away" any of these without reading its WHY. Each one trades
 something (generality, features, strictness) for something this project values
 more (simplicity, key custody, availability).
 
-### 1.1 Access control is normalized-email identity, not roles or user IDs
+### 1.1 Access control is normalized-email identity; roles layer on top of it
 
-- There is no user table and no role system. Identity IS the lowercased,
-  trimmed email from the Auth0 session (`lib/auth.js:5-7` `normalizeEmail`).
-  Admins = membership in `ADMIN_EMAILS` (`lib/auth.js:9-20`); viewers =
-  membership in the Redis SET `fable2:viewers` (`lib/guard.js:31`).
+- There is still no user table. Identity IS the lowercased, trimmed email from
+  the Auth0 session (`lib/auth.js:5-7` `normalizeEmail`), and every stored
+  record — viewers, roles, groups — is keyed by that string. **Updated
+  2026-08-30**: a capability layer now sits on top of it. Owners = membership in
+  `ADMIN_EMAILS` (`lib/auth.js:9-20`), who hold the entire capability catalog
+  by definition and are resolved from the env var with **no Redis read**;
+  role-holders = emails with entries in `fable2:user:roles`, whose capabilities
+  are the union of their roles and **fail closed to none**; viewers =
+  membership in the Redis SET `fable2:viewers`. The catalog itself
+  (`lib/capabilities.js`) is defined in code, never in Redis — each string
+  names a real enforcement point, so a hand-written capability grants nothing.
 - WHY: a private portal for a small invited audience needs exactly one
   question answered — "is this email on the list?" — and email is the unit
   admins actually think in (they invite people by email, share links by email).
-  No schema, no migrations, no ID↔email mapping to drift.
+  No schema, no migrations, no ID↔email mapping to drift. The role layer keeps
+  that property: it answers "which capabilities does this email have", never
+  "which user id is this", so nothing about identity resolution changed.
+- WHY the owner set stays in the env var: an admin-writable owner list is a
+  bigger prize than an env var, and self-lockout (removing the last admin) is
+  unrecoverable from inside the UI. Keeping owners env-only makes both failures
+  structurally impossible rather than merely guarded. Redis can only ADD
+  privilege; the **no-escalation rule** (`canDelegate`, `lib/capabilities.js`)
+  caps how far a delegated `roles.manage` can spread it — an actor may only
+  create, edit, delete or assign a role whose capabilities are a subset of
+  their own.
 - LOAD-BEARING DEPENDENCY: this is only safe while **Auth0 open sign-ups stay
   disabled** tenant-wide (README.md:155, README.md:232). Anyone who can create
   an Auth0 account with an arbitrary email would inherit that email's access,
@@ -147,8 +170,11 @@ actually breaks.
 | # | Invariant | Enforcement (verified 2026-07-18) | If violated |
 |---|---|---|---|
 | I1 | Every email comparison goes through `normalizeEmail` | `lib/auth.js:5-7`; used at every check site: `lib/guard.js:7`, `lib/auth.js:12,17`, `pages/index.js:14`, `pages/watch/[id].js:20`, `pages/admin.js:24`, `pages/s/[id].js:20,31`, `pages/api/admin/viewers.js:36,58`, `pages/api/admin/share.js:52`, `lib/push.js:23-25,54` | Case/whitespace variants of one email become distinct identities: viewers stored as `Bob@X` never match session `bob@x`; share links unusable by their own recipient |
-| I2 | Every `/api/admin/*` route calls `requireAdmin` first and returns on null | All 18 routes (updated 2026-07-26, was 13): analytics.js:9, audit.js:6, broadcast.js:7, bulk-share.js:19, cleanup.js:15, collections.js:6, order.js:7, private-list.js:24, settings.js:8, share.js:11, shares.js:8, shares-bulk.js:17, upload.js:11, videos.js:15, videos-bulk.js:15, viewer-activity.js:12, viewers.js:8, viewers-bulk.js:15 (each followed by `if (!admin) return`) | Any signed-in (or with a broken session check, anonymous) user can upload, delete videos, mint/resend/extend/revoke share links, edit the viewer list |
+| I2 | Every `/api/admin/*` route calls `requireCapability` **first**, naming the capability it needs, and returns on null | All 20 routes (**updated 2026-08-30**, was 18 on `requireAdmin`): analytics + viewer-activity → `analytics.read`; audit → `audit.read`; broadcast → `broadcast.send`; share, shares-bulk, bulk-share, private-list → `shares.manage`; shares → `shares.read`/`shares.manage` by method; cleanup, settings → `settings.manage`; order, videos-bulk → `videos.manage`; upload → `videos.upload`; videos, collections → `videos.read`/`videos.manage` by method; viewers → `viewers.read`/`viewers.manage` by method; viewers-bulk → `viewers.manage`; groups → `groups.manage`; roles → `roles.manage`. Plus `POST /api/theme` → `settings.manage`. Verify: `grep -rL "requireCapability" pages/api/admin/*.js` (expect no output) | Any signed-in (or with a broken session check, anonymous) user can upload, delete videos, mint/resend/extend/revoke share links, edit the viewer list — or a staff member with one narrow capability reaches every other admin action |
+| I2b | Owners are decided from `ADMIN_EMAILS` alone, with no Redis read; role capabilities fail closed | `lib/guard.js` `resolveActor` → `lib/roles.js` `resolveCapabilities` (owner short-circuits before any Redis call; the non-owner path's `catch` returns `[]`) | A Redis outage or a hand-edited record could demote a bootstrap admin (locking everyone out of /admin permanently) or widen a role-holder's access |
+| I2c | An actor may only create, edit, delete or assign a role whose capabilities are a **subset of their own** | `lib/capabilities.js` `canDelegate` / `undelegatableCapabilities`, enforced on every mutating branch of `pages/api/admin/roles.js` (PUT checks the current AND the new set, PATCH checks the union of roles added and removed) | A delegated `roles.manage` becomes a path to every other capability — the privilege-escalation surface that kept in-app admin management off the roadmap |
 | I3 | Every viewer-data API calls `requireViewer` (or an explicit documented weaker guard) | `/api/videos` → videos.js:11; `/api/collections` → collections.js:6; `/api/progress` → progress.js:8; `/api/push/subscribe` → subscribe.js:8. Deliberate exceptions: `/api/theme` GET is public (theme.js:6-17 — colors only, POST is requireAdmin at theme.js:20); `/api/push/unsubscribe` needs only a session (unsubscribe.js:8-9 — a de-listed viewer must still be able to silence their device); `/api/share-event` needs only a session, then does its own email-match check against the share record (share-event.js:10-36) — the same non-`requireViewer` pattern as `pages/s/[id].js` and `pages/b/[id].js` themselves, since recipients aren't necessarily approved viewers | Unapproved accounts enumerate the library, read/write watch history, register push devices |
+| I3b | Group content gating, when on, is enforced at **all three** viewer content paths — never just the list | `pages/api/videos.js` (`filterVideosByScope`), `pages/api/collections.js` (`filterCollectionsByScope`), `pages/watch/[id].js` GSSP (`isVideoVisible`, after the video is fetched). All read the same `contentScopeFor`, which returns `DENY_SCOPE` on error | Filtering the homepage while leaving `/watch/<guid>` open is not a gate at all — a member reads any guid straight from a URL |
 | I4 | `BUNNY_API_KEY` is read server-side only, in one place | `lib/bunny.js:11` is the sole reference in the repo; only the derived TUS signature reaches the browser (`pages/api/admin/upload.js:23-25`) | Full read/write control of the Bunny library leaks to any page viewer |
 | I5 | Embed URLs are generated per request and never persisted | Only two call sites, both inside `getServerSideProps`: `pages/watch/[id].js:62`, `pages/s/[id].js:56`; nothing writes an embed URL to Redis or returns one from an API list endpoint (`/api/videos` returns guid/title/length/thumbnail only, videos.js:35-41) | A stored URL becomes an unrevocable bearer credential outliving viewer removal |
 | I6 | All Redis access goes through `redis()` and all keys through `k()` | `new Redis` exists only in `lib/redis.js:10`; no literal `fable2:`/`pvp:` key string exists outside `lib/redis.js` (the two remaining `pvp` strings are client-side names, not Redis keys: `lib/theme.js:20`, `public/sw.js:4`) | Split-brain state across prefixes; a second client with different env fallbacks silently targets another database |
@@ -186,6 +212,11 @@ still defensively handle string values.
 | `viewers` | SET | normalized emails | SADD admin/viewers.js:49; SREM admin/viewers.js:61 | guard.js:31; index.js:19; watch/[id].js:25; push.js:50; admin/viewers.js:14 | none (the access-control list — never expires) |
 | `viewer:lastseen` | HASH | email → ISO timestamp | HSET guard.js:40-42, index.js:25-27, watch/[id].js:52-54; HDEL admin/viewers.js:62 | HGETALL admin/viewers.js:15 | none |
 | `viewer:tags` | HASH | email → array of tag strings (**new 2026-07-26**) | HSET `lib/viewerTags.js` `addTagToViewers`/`removeTagFromViewers` (via `pages/api/admin/viewers-bulk.js`, actions `add-tag`/`remove-tag`, doubles as the single-viewer editor when called with a one-email selection); HDEL when a viewer's last tag is removed, or outright via `clearViewerTags` when the viewer itself is removed (`pages/api/admin/viewers.js` DELETE) | HGETALL `lib/viewerTags.js` `getAllViewerTags`, via `pages/api/admin/viewers.js` GET (returned per-viewer plus the distinct tag list) and the share forms' by-tag recipient picker in `pages/admin.js` | none. Tag strings capped 40 chars, whitespace-collapsed (`normalizeTag`); capped 20 tags/viewer at write. Purely a grouping label — not itself consulted by any access-control check; only currently-approved viewers (members of `viewers`) can be tagged |
+| `roles` | HASH | roleId → `{id, name, capabilities[], createdAt, updatedAt}` (**new 2026-08-30**) | HSET `lib/roles.js` `saveRole`; HDEL `deleteRole` (both via `pages/api/admin/roles.js`) | HGETALL `lib/roles.js` `loadRoles`, reached from `resolveCapabilities` on every staff request and from the Roles tab | none. Capped at 50 roles; role names 60 chars, whitespace-collapsed. Capability strings outside `lib/capabilities.js`'s catalog are dropped on write AND ignored on read, so a hand-edited record cannot widen the catalog |
+| `user:roles` | HASH | email → array of roleIds (**new 2026-08-30**) | HSET/HDEL `lib/roles.js` `setRolesForEmail`; swept by `deleteRole` for every holder; HDEL via `clearRolesForEmail` when the viewer itself is removed (`pages/api/admin/viewers.js` DELETE) | HGET `rolesForEmail` (the hot path, via `resolveCapabilities`); HGETALL `loadRoleAssignments` for the Roles tab | none; capped 10 roles/user. Ids with no live role record are dropped at write and contribute nothing at read. **Never consulted for owners** — `ADMIN_EMAILS` resolves to the full catalog without touching this key |
+| `groups` | HASH | groupId → `{id, name, collectionIds[], videoIds[], createdAt, updatedAt}` (**new 2026-08-30**) | HSET `lib/groups.js` `saveGroup`; HDEL `deleteGroup` (via `pages/api/admin/groups.js`) | HGETALL `loadGroups`, from the Groups tab and from `contentScopeFor` when gating is on | none; capped 100 groups, 500 scope entries per list, names 60 chars |
+| `user:groups` | HASH | email → array of groupIds (**new 2026-08-30**) | HSET/HDEL `lib/groups.js` `setGroupsForEmail` (per-user) and `setMembersOfGroup` (per-group, diffs and touches only changed emails); swept by `deleteGroup`; HDEL via `clearGroupsForEmail` on viewer removal | HGET `groupIdsForEmail` (only when gating is on); HGETALL `loadGroupMemberships` for the Groups tab and for inverting into a member list | none; capped 20 groups/user. Unlike `viewer:tags`, this key CAN affect access — but only while `GROUP_CONTENT_GATING=1` |
+| `settings:groupDefaultAccess` | string | `'open'` \| `'closed'` (**new 2026-08-30**) | SET `pages/api/admin/groups.js` PATCH `set-default-access` | GET `lib/groups.js` `groupDefaultAccess` | none; anything but `'closed'` reads as `'open'`, the non-destructive default, so enabling gating never silently blanks an audience |
 | `settings:homeCount` | string | integer as string | SET admin/settings.js:26 | admin/settings.js:14; api/videos.js:23 | none; clamped 1–200 on every read (videos.js:26, settings.js:15) |
 | `order` | string (JSON array) | array of video guids | SET admin/order.js:19; pruned on video delete admin/videos.js:66-72 | api/videos.js:24; admin/videos.js:24 | none; capped 500 entries at write (order.js:11-15) |
 | `theme` | string (JSON object) | `{name, colors:{bg,panel,text,muted,accent,accent2}}` | SET api/theme.js:26 (validated, theme.js:25-39) | api/theme.js:11 (public GET) | none |
@@ -227,20 +258,30 @@ do not describe any of them as mitigated-in-code.
    writes, capped at 200 entries (`lib/audit.js:3,16-20`) — entries can be
    silently dropped, and history beyond 200 actions is gone. Treat it as an
    operator convenience, never as evidence.
-4. **Admin list is env-frozen.** Admins come from `ADMIN_EMAILS`
-   (`lib/auth.js:9-14`); changing admins requires a Vercel env edit + redeploy,
-   unlike viewers (live in Redis).
-5. **Homepage silently truncates libraries >100 videos.** `/api/videos`
+4. **Owner list is env-frozen** (OPEN, deliberate — narrowed 2026-08-30).
+   Delegated staff access is now live-editable (roles in Redis), but the OWNER
+   set still comes from `ADMIN_EMAILS` (`lib/auth.js:9-14`) and changing it
+   requires a Vercel env edit + redeploy. This is the design, not a gap left
+   for later: an admin-writable owner list is a bigger prize than an env var,
+   and it is what makes self-lockout (removing the last admin) structurally
+   impossible. Two consequences to state honestly: bootstrapping the very first
+   role still needs an owner, and an owner cannot be demoted from the UI at all.
+5. **A role-holder is implicitly an approved viewer.** `viewerAccessFor`
+   (`lib/guard.js`) treats "holds ≥ 1 capability" as approved even if the email
+   is not in the `viewers` SET. Deliberate — it is strictly less privilege than
+   what the role already grants — but it means removing someone from `viewers`
+   does NOT cut off their library access while they still hold a role.
+6. **Homepage silently truncates libraries >100 videos.** `/api/videos`
    fetches only page 1 of `min(homeCount, 100)` from Bunny
    (`pages/api/videos.js:30`) while `homeCount` may be set up to 200
    (videos.js:26). With >100 playable videos, items beyond Bunny's first 100
    never appear regardless of the setting — and any `order`/cap logic
    (videos.js:32) operates on that truncated page.
-6. **Search/collection filtering is Bunny-side, page 1 only.** `listVideos`
+7. **Search/collection filtering is Bunny-side, page 1 only.** `listVideos`
    passes `search`/`collection` to Bunny (`lib/bunny.js:32-41`) but only page 1
    is ever requested (videos.js:30), so results are whatever Bunny ranks into
    the first ≤100 items.
-7. **The `shares` SET self-prunes only on admin reads, and only much later than
+8. **The `shares` SET self-prunes only on admin reads, and only much later than
    before.** Updated 2026-07-21: `share:<id>` records now deliberately survive
    ~60 days past their logical `expiresAt` (the extend grace window — see §3),
    so an id stays in the index, visibly "Expired" in the admin Shares list,
@@ -251,12 +292,12 @@ do not describe any of them as mitigated-in-code.
    stays auditable and distinguishable from "merely expired". Between reads
    the index can still over-count relative to what's expired-and-gone;
    harmless but surprising.
-8. **Idle timeout is client-side only.** 30-minute inactivity logout runs in
+9. **Idle timeout is client-side only.** 30-minute inactivity logout runs in
    the browser (`components/IdleTimeout.js:3,12-14`, mounted in
    `pages/_app.js:34`); meanwhile middleware rolls the session cookie on every
    request (`middleware.js:3-7`). Anything that blocks the redirect (devtools,
    a frozen tab) defeats it; the session itself does not expire at 30 min.
-9. **Legacy `pvp` names in client storage** (cosmetic). localStorage theme key
+10. **Legacy `pvp` names in client storage** (cosmetic). localStorage theme key
    `pvp:theme` (`lib/theme.js:20`) and service-worker cache `pvp-static-v1`
    (`public/sw.js:4`). Renaming them invalidates users' cached theme/assets
    for zero benefit — leave them unless doing a coordinated migration. These
@@ -297,11 +338,20 @@ grep -n "fable2" lib/redis.js                     # expect: line 19 only
 grep -rn "new Redis" --include="*.js" lib pages components   # expect: lib/redis.js only
 grep -rn "pvp:" --include="*.js" lib pages components | grep -v theme.js   # expect: lib/redis.js:18 stale comment only
 
-# I2 — every admin route guarded
-grep -rLn "requireAdmin" pages/api/admin/*.js     # expect: no output
+# I2 — every admin route guarded, and by which capability
+grep -rL "requireCapability" pages/api/admin/*.js  # expect: no output
+grep -rn "requireCapability(req, res," pages/api/admin/*.js pages/api/theme.js
+grep -rn "requireAdmin" lib pages                  # expect: no output (removed 2026-08-30)
+
+# I2b/I2c — owners bypass Redis; delegation is subset-capped
+grep -n "if (owner) return" lib/roles.js           # owner short-circuit before any Redis call
+grep -n "canDelegate\|undelegatable" lib/capabilities.js pages/api/admin/roles.js
 
 # I3 — viewer APIs guarded (theme GET + push/unsubscribe are documented exceptions)
-grep -rn "requireViewer\|requireAdmin\|getSessionEmail" pages/api/*.js pages/api/push/*.js
+grep -rn "requireViewer\|requireCapability\|getSessionEmail" pages/api/*.js pages/api/push/*.js
+
+# I3b — group gating enforced at all three content paths
+grep -rn "contentScopeFor" pages/api/videos.js pages/api/collections.js "pages/watch/[id].js"
 
 # I4 — API key custody
 grep -rn "BUNNY_API_KEY" --include="*.js" . | grep -v node_modules   # expect: lib/bunny.js only

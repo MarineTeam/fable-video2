@@ -1,5 +1,6 @@
 import { withMonitorApi } from "../../../lib/monitor";
-import { requireAdmin } from '../../../lib/guard';
+import { requireCapability } from '../../../lib/guard';
+import { CAP } from '../../../lib/capabilities';
 import { logAction } from '../../../lib/audit';
 import { pruneGoneShares } from '../../../lib/share';
 import { cleanupStaleBundles } from '../../../lib/bundle';
@@ -13,7 +14,7 @@ import { cleanupStaleBundles } from '../../../lib/bundle';
 // just lets an admin reclaim the space on demand instead of waiting.
 async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  const admin = await requireAdmin(req, res);
+  const admin = await requireCapability(req, res, CAP.SETTINGS_MANAGE);
   if (!admin) return;
   try {
     const [goneShares, bundleResult] = await Promise.all([pruneGoneShares(), cleanupStaleBundles()]);

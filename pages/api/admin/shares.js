@@ -1,12 +1,13 @@
 import { withMonitorApi } from "../../../lib/monitor";
-import { requireAdmin } from '../../../lib/guard';
+import { requireCapability } from '../../../lib/guard';
+import { CAP } from '../../../lib/capabilities';
 import { redis, k } from '../../../lib/redis';
 import { getVideo } from '../../../lib/bunny';
 import { logAction } from '../../../lib/audit';
 import { shareStatus, revokeShare, unrevokeShare, purgeShare, loadShares } from '../../../lib/share';
 
 async function handler(req, res) {
-  const admin = await requireAdmin(req, res);
+  const admin = await requireCapability(req, res, req.method === 'GET' ? CAP.SHARES_READ : CAP.SHARES_MANAGE);
   if (!admin) return;
   const r = redis();
 

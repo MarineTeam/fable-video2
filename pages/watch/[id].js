@@ -3,8 +3,10 @@ import AppShell from '../../components/AppShell';
 import ResumablePlayer from '../../components/ResumablePlayer';
 import { ChevronLeftIcon } from '../../components/icons';
 import { auth0 } from '../../lib/auth0';
-import { isAdmin, normalizeEmail } from '../../lib/auth';
+import { normalizeEmail } from '../../lib/auth';
 import { redis, k } from '../../lib/redis';
+import { viewerAccessFor } from '../../lib/guard';
+import { contentScopeFor, isVideoVisible } from '../../lib/groups';
 import { getVideo, signedEmbedUrl } from '../../lib/bunny';
 import { resolveWatermark, isExempt, getVideoMode, getGlobalDefault } from '../../lib/watermark';
 import { isGeoAllowed } from '../../lib/geo';
@@ -21,17 +23,12 @@ async function gssp({ req, res, params }) {
     };
   }
   const email = normalizeEmail(session.user.email);
-  const admin = isAdmin(email);
+  // Same approval decision as /api/videos and the homepage, resolved in one
+  // place so the three cannot drift (lib/guard.js).
+  const { approved, owner, staff } = await viewerAccessFor(email);
+  const admin = owner || staff;
   if (!(await isGeoAllowed(req, { admin, email }))) {
     return { redirect: { destination: '/', permanent: false } };
-  }
-  let approved = admin;
-  if (!approved) {
-    try {
-      approved = (await redis().sismember(k('viewers'), email)) === 1;
-    } catch {
-      approved = false;
-    }
   }
   if (!approved) {
     return { redirect: { destination: '/', permanent: false } };
@@ -44,6 +41,14 @@ async function gssp({ req, res, params }) {
     return { notFound: true };
   }
   if (!video?.guid) return { notFound: true };
+
+  // Group content gating, enforcement point 3 of 3 (with /api/videos and
+  // /api/collections). Filtering the list without gating direct URLs would
+  // not be a gate at all. Inert unless GROUP_CONTENT_GATING=1.
+  const scope = await contentScopeFor(email, { staff: admin });
+  if (!isVideoVisible(scope, video)) {
+    return { redirect: { destination: '/', permanent: false } };
+  }
 
   // Resume position, if any.
   let initialTime = 0;

@@ -1,5 +1,6 @@
 import { withMonitorApi } from "../../../lib/monitor";
-import { requireAdmin } from '../../../lib/guard';
+import { requireCapability } from '../../../lib/guard';
+import { CAP } from '../../../lib/capabilities';
 import { allowRequest } from '../../../lib/ratelimit';
 import { normalizeEmail, isValidEmail } from '../../../lib/auth';
 import { getVideo } from '../../../lib/bunny';
@@ -22,7 +23,7 @@ const MAX_EMAILS = 50;
 // created for them — a share for the same (videoId, email) created through
 // the regular Share/Bulk Share button is untouched either way.
 async function handler(req, res) {
-  const admin = await requireAdmin(req, res);
+  const admin = await requireCapability(req, res, CAP.SHARES_MANAGE);
   if (!admin) return;
 
   if (req.method === 'GET') {

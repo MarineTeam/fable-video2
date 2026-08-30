@@ -3,8 +3,9 @@ import Link from 'next/link';
 import AppShell from '../components/AppShell';
 import { PlayIcon, SearchIcon, ChevronLeftIcon, ChevronRightIcon } from '../components/icons';
 import { auth0 } from '../lib/auth0';
-import { isAdmin, normalizeEmail } from '../lib/auth';
+import { normalizeEmail } from '../lib/auth';
 import { redis, k } from '../lib/redis';
+import { viewerAccessFor } from '../lib/guard';
 import { isGeoAllowed } from '../lib/geo';
 import { withMonitorPage } from '../lib/monitor';
 
@@ -14,18 +15,13 @@ async function gssp({ req, res }) {
     return { redirect: { destination: '/auth/login?returnTo=/', permanent: false } };
   }
   const email = normalizeEmail(session.user.email);
-  const admin = isAdmin(email);
+  const { approved, owner, staff } = await viewerAccessFor(email);
+  // "admin" here means "show the Admin link" — an owner or anyone holding a
+  // capability, since both have somewhere to go in /admin.
+  const admin = owner || staff;
   const user = { email, name: session.user.name || email };
   if (!(await isGeoAllowed(req, { admin, email }))) {
     return { props: { user, isAdmin: admin, approved: false, geoBlocked: true } };
-  }
-  let approved = admin;
-  if (!approved) {
-    try {
-      approved = (await redis().sismember(k('viewers'), email)) === 1;
-    } catch {
-      approved = false;
-    }
   }
   if (approved) {
     redis()

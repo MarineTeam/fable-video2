@@ -2,7 +2,7 @@
 name: validation-and-qa
 description: >-
   What counts as evidence in Marine Video Portal: the evidence hierarchy, the
-  certified 30-test inventory and what each file protects, the house pattern
+  certified test inventory and what each file protects, the house pattern
   for adding tests (pure functions in lib/, vitest only runs lib/__tests__),
   manual security-invariant checklists, and acceptance thresholds. Use when
   writing/reviewing tests, deciding whether a change is proven, or verifying
@@ -37,10 +37,18 @@ test X" or "ran checklist item 5, observed 'Link unavailable'". Higher levels
 do not substitute for lower ones: a passing manual check does not excuse a red
 CI, and green CI does not prove an integration claim.
 
-## 2. Certified test inventory (as of 2026-07-18)
+## 2. Certified test inventory (as of 2026-07-18; counts refreshed 2026-08-30)
 
-`npm test` → vitest run → **4 files, 30 tests, all passing, ~0.5s**. Every
+`npm test` → vitest run → **14 files, 158 tests, all passing, ~1.2s**. Every
 test file lives in `lib/__tests__/` and tests a pure module in `lib/`.
+
+**Known drift, stated honestly:** the four-row table below was written when the
+suite was 4 files / 30 tests and has not been extended for every file added
+since (`bundle`, `geo`, `monitor`, `privateList`, `share`, `videoAnalytics`,
+`viewerTags`, `watermark` all lack rows). The two 2026-08-30 rows are appended
+because they protect security invariants; the rest of the backfill is an open
+docs task, not a claim that those files are untested. Trust `ls lib/__tests__/`
+over this table for coverage questions.
 
 These tests are **golden**: they encode load-bearing product invariants. A
 change that breaks one is wrong until proven otherwise — fix the change, not
@@ -52,10 +60,12 @@ change-control decision, see `.claude/skills/change-control/SKILL.md`).
 | `lib/__tests__/auth.test.js` | 10 | `lib/auth.js` | `isAdmin` matches admin emails case-insensitively and whitespace-tolerantly; empty/missing `ADMIN_EMAILS` means *nobody* is admin; `normalizeEmail` lowercases+trims and null-safes; `isValidEmail` rejects garbage | **Access-control bedrock.** Every guard in the app compares normalized emails. A normalization regression silently locks out (or worse, admits) the wrong people. |
 | `lib/__tests__/order.test.js` | 6 | `lib/order.js` | `applyOrder`: placed videos follow the saved order; **unplaced videos float to the top, newest first**; entries for deleted videos are ignored; null-safe. `pruneOrder` drops dead guids. | Float-to-top is the product's "new uploads are always visible" promise. Inverting it hides new content behind stale ordering. |
 | `lib/__tests__/push.test.js` | 7 | `lib/push.js` | `shouldAnnounce`: only status 4 (finished), only within the 48h `ANNOUNCE_WINDOW_MS`, unparseable dates rejected — **no back-blast** of the old library when push is first enabled. `eligibleSubs`: only currently-allowed emails receive pushes (case-insensitive), malformed entries dropped — **a removed viewer stops getting notifications** even if their device subscription lingers. | Back-blast would spam every subscriber once per historical video. Removed-viewer exclusion is an access-revocation guarantee. |
+| `lib/__tests__/capabilities.test.js` | 18 | `lib/capabilities.js` | The catalog is closed (unknown strings are never capabilities, even when stored in Redis); an owner resolves to the whole catalog without any stored role; a non-owner's set is the union of their roles and nothing else; and the **no-escalation rule** — `canDelegate`/`undelegatableCapabilities` — refuses to let an actor hand out a capability they lack. Includes the negative control: a `roles.manage` holder cannot grant `settings.manage`. | **The privilege ceiling.** These four properties are the entire reason an admin-writable permission store is safe here. If the subset rule regresses, any delegated `roles.manage` becomes a path to every other capability. |
+| `lib/__tests__/groups.test.js` | 23 | `lib/groups.js` | `resolveContentScope`: unrestricted while gating is off or for staff; the ungrouped default is honoured both ways; group scopes union; **a group scoped to nothing grants nothing** (groups restrict, they do not grant). `isVideoVisible`/`isCollectionVisible`: admit by video id or by collection, refuse otherwise, refuse blank ids, and deny everything under `DENY_SCOPE`. | Gating is only a gate if all three enforcement points agree, and they all read this one resolver. The "empty group grants nothing" case is the one an intuition about groups gets backwards. |
 | `lib/__tests__/theme.test.js` | 7 | `lib/theme.js` | `validateTheme`: only exact 6-digit hex colors accepted (`red`, `#fff` rejected), name capped at 32 chars, non-objects rejected — **injection-safe palette validation** for admin-supplied themes rendered as CSS variables. All 7 shipped presets validate. `themeCssVars` maps every color key and falls back to the default theme. | Theme colors from Redis are written into inline style. Strict hex validation is what makes that safe. |
 
-Re-verify the counts any time: `npm test` must report `Test Files 4 passed (4)`
-and `Tests 30 passed (30)` (plus any you have since added).
+Re-verify the counts any time: `npm test` must report `Test Files 14 passed (14)`
+and `Tests 158 passed (158)` (plus any you have since added).
 
 ## 3. How to add tests — the house pattern
 
@@ -306,7 +316,7 @@ Derived 2026-07-18 by reading `vitest.config.js`, all four files in
 `lib/push.js`, `lib/theme.js`), `lib/guard.js`, `lib/bunny.js`,
 `pages/admin.js`, `pages/s/[id].js`, `pages/index.js`,
 `pages/api/admin/share.js`, `eslint.config.mjs`, and
-`.github/workflows/ci.yml`; and by running `npm test` (4 files / 30 tests /
+`.github/workflows/ci.yml`; and by running `npm test` (14 files / 158 tests /
 ~0.5s, all green) and `npm run lint` (clean) in this repo.
 
 Re-verification one-liners for facts that may drift:

@@ -1,5 +1,6 @@
 import { withMonitorApi } from "../../../lib/monitor";
-import { requireAdmin } from '../../../lib/guard';
+import { requireCapability } from '../../../lib/guard';
+import { CAP } from '../../../lib/capabilities';
 import { allowRequest } from '../../../lib/ratelimit';
 import { logAction } from '../../../lib/audit';
 import { addTagToViewers, removeTagFromViewers } from '../../../lib/viewerTags';
@@ -13,7 +14,7 @@ const MAX_EMAILS = 500;
 // tag editor — the admin UI just calls it with a one-email selection.
 async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  const admin = await requireAdmin(req, res);
+  const admin = await requireCapability(req, res, CAP.VIEWERS_MANAGE);
   if (!admin) return;
   if (!(await allowRequest('viewers-bulk', admin, 20, 60))) {
     return res.status(429).json({ error: 'Too many requests' });

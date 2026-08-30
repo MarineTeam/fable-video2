@@ -29,7 +29,46 @@ grep -rn "requireAdmin\|requireViewer\|getSessionEmail\|getSession" pages lib/gu
 grep -n "matcher" middleware.js                  # what bypasses the session-rolling middleware
 ```
 
-Verified matrix (2026-07-18):
+**Matrix re-verified 2026-08-30** after the roles/groups change. Two structural
+notes before the rows: (a) `requireAdmin` no longer exists — every admin route
+names a capability via `requireCapability`, so a row's guard is now
+"`requireCapability(<cap>)`", and where a route's read and write halves differ
+in privilege the capability is chosen from `req.method`; (b) three viewer
+content paths gained a second, deployment-gated check (group content scope),
+which never widens access and is inert unless `GROUP_CONTENT_GATING=1`.
+
+Guard-to-capability map for `/api/admin/*` (all 20 routes, each the first
+statement, each followed by `if (!admin) return`):
+`analytics`, `viewer-activity` → `analytics.read` · `audit` → `audit.read` ·
+`broadcast` → `broadcast.send` · `share`, `shares-bulk`, `bulk-share`,
+`private-list` → `shares.manage` · `shares` → `shares.read`/`shares.manage` ·
+`cleanup`, `settings` → `settings.manage` · `order`, `videos-bulk` →
+`videos.manage` · `upload` → `videos.upload` · `videos`, `collections` →
+`videos.read`/`videos.manage` · `viewers` → `viewers.read`/`viewers.manage` ·
+`viewers-bulk` → `viewers.manage` · `groups` → `groups.manage` · `roles` →
+`roles.manage`. Also `POST /api/theme` → `settings.manage` (GET stays public).
+
+New rows (2026-08-30):
+
+| Surface | Methods | Guard | Notes |
+|---|---|---|---|
+| `/api/admin/roles` | GET, POST, PUT, PATCH, DELETE | `requireCapability(roles.manage)` + rate limit 20/min on mutations | Every mutating branch additionally enforces the subset rule (`canDelegate`): PUT checks the role's current AND new capability sets, PATCH checks the union of roles added and removed. 403 body names the refused capabilities — deliberate: it tells an actor what they lack, never what anyone else holds |
+| `/api/admin/groups` | GET, POST, PUT, PATCH, DELETE | `requireCapability(groups.manage)` + rate limit 20/min on mutations | PATCH carries three actions: `set-members`, `set-groups`, `set-default-access` |
+
+Changed rows: `/admin` (page) now admits any **staff** — an owner or anyone
+holding ≥ 1 capability — instead of `ADMIN_EMAILS` only; props gained the
+caller's OWN capability list and owner flag (never anyone else's). `/`,
+`/watch/[id]`, `/api/videos` and `/api/collections` keep their existing guards
+and additionally apply the group content scope when gating is on;
+`/watch/[id]` redirects to `/` for a video outside the scope, which is the same
+response as an unapproved viewer gets — so it stays a non-oracle.
+
+Deliberate NON-rows: `/s/[id]` and `/b/[id]` are **not** group-gated. A share is
+an explicit per-recipient grant naming one video, issued to people who need not
+be approved viewers at all; gating it by group membership would break the
+feature rather than tighten it.
+
+Verified matrix (2026-07-18, guard column superseded by the map above):
 
 | Surface | Methods | Guard | Notes |
 |---|---|---|---|

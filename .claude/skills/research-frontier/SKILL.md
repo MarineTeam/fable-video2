@@ -41,23 +41,23 @@ documented failure archaeology.
   the request key appears in redis-inspect and the entry-point matrix gains
   its row.
 
-### 1b. In-app admin management — status: OPEN, higher risk
-- **Falls short:** `ADMIN_EMAILS` is env-frozen (`lib/auth.js`); changing
-  admins needs a redeploy.
-- **Asset:** the settings-tab + Redis pattern. **Named risks that make this
-  candidate, not planned:** self-lockout (removing the last admin) and
-  privilege escalation surface (an admin-writable admin list is a bigger
-  prize than an env var). Design obligation: env list stays as the
-  non-removable bootstrap set; Redis can only ADD admins; every change
-  audit-logged.
-- **First three steps:** (1) write the threat analysis using
-  security-analysis-toolkit recipes 1 and 5 BEFORE any code; (2) extend
-  `isAdmin` to check env-set ∪ Redis-set with fail-closed Redis handling —
-  note this touches the one file identity logic lives in, maximally
-  security-touching; (3) tests first in `lib/__tests__/auth.test.js`.
-- **Result when:** an env-listed admin can grant/revoke Redis-listed admins
-  live; no sequence of UI actions can remove the last env admin (test proves
-  it); matrix and audit rows exist.
+### 1b. In-app admin management — status: SHIPPED 2026-08-30, retired from this list
+- Delivered as **capability-based roles**, not as an editable admin list: a
+  fixed catalog in `lib/capabilities.js`, admin-defined roles in Redis
+  (`lib/roles.js`, `/admin` → Roles), and `requireCapability` on every admin
+  route. Both named risks were designed out rather than guarded against —
+  self-lockout is impossible because `ADMIN_EMAILS` stays the env-only,
+  non-removable owner set (Redis can only ADD privilege), and the escalation
+  surface is capped by the subset rule `canDelegate`, so a delegated
+  `roles.manage` can pass on only what its holder already has.
+- Shipped alongside **groups** (`lib/groups.js`), whose content gating is an
+  env-gated experiment (`GROUP_CONTENT_GATING`, inert by default) — the one
+  part of that change still awaiting a real-deployment result. Its milestone,
+  if anyone picks it up: run a week with gating on and confirm no approved
+  viewer loses access they should have had, then decide whether `closed`
+  becomes a sane default for the ungrouped case.
+- Story moved to FEATURES.md; see the architecture contract (§1.1, I2/I2b/I2c)
+  for the invariants it introduced.
 
 ### 1c. Captions/transcripts, scheduled publish/expiry — status: OPEN, unscoped
 - **Falls short:** FEATURES.md lists both as not implemented.

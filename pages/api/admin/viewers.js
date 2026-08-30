@@ -1,12 +1,15 @@
 import { withMonitorApi } from "../../../lib/monitor";
-import { requireAdmin } from '../../../lib/guard';
+import { requireCapability } from '../../../lib/guard';
+import { CAP } from '../../../lib/capabilities';
 import { redis, k } from '../../../lib/redis';
 import { normalizeEmail, isValidEmail } from '../../../lib/auth';
 import { logAction } from '../../../lib/audit';
 import { getAllViewerTags, distinctTags, clearViewerTags } from '../../../lib/viewerTags';
+import { clearRolesForEmail } from '../../../lib/roles';
+import { clearGroupsForEmail } from '../../../lib/groups';
 
 async function handler(req, res) {
-  const admin = await requireAdmin(req, res);
+  const admin = await requireCapability(req, res, req.method === 'GET' ? CAP.VIEWERS_READ : CAP.VIEWERS_MANAGE);
   if (!admin) return;
   const r = redis();
 
@@ -68,6 +71,11 @@ async function handler(req, res) {
       await r.srem(k('viewers'), email);
       await r.hdel(k('viewer:lastseen'), email).catch(() => {});
       await clearViewerTags(email);
+      // Removing a viewer removes everything keyed to them, so no orphaned
+      // role assignment or group membership can outlive the account and come
+      // back to life if the same address is re-added later.
+      await clearRolesForEmail(email);
+      await clearGroupsForEmail(email);
       await logAction(admin, 'viewer.remove', email);
       return res.json({ ok: true });
     } catch {

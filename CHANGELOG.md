@@ -3,6 +3,52 @@
 All notable changes to the Marine Video Portal. Dates are UTC, matching the
 commit history (`git log --oneline`).
 
+## 2026-08-30 — Capability-based roles and viewer groups
+
+- **Roles**: admin access is no longer a binary env-var check. A fixed catalog
+  of 13 capabilities (`lib/capabilities.js`) is grouped into admin-defined
+  roles stored in Redis and assigned per email from a new `/admin` → Roles tab
+  (`pages/api/admin/roles.js`, `lib/roles.js`).
+- Every one of the 19 previously `requireAdmin`-guarded routes (18 under
+  `pages/api/admin/` plus `POST /api/theme`) now calls `requireCapability` with
+  the capability it needs; routes whose read and write halves differ in
+  privilege pick per method (e.g. `videos.read` for `GET /api/admin/videos`,
+  `videos.manage` for `PUT`/`DELETE`). `requireAdmin` is gone — replacing it
+  outright means a route that was missed fails to compile rather than silently
+  keeping a wider gate.
+- Three security properties, each unit-tested: `ADMIN_EMAILS` accounts are
+  **owners** holding the whole catalog, resolved from the env var with no Redis
+  read (no stored data or Redis outage can demote them); every other caller's
+  capabilities **fail closed** to none; and the **no-escalation rule** lets an
+  actor create, edit, delete or assign only roles whose capabilities are a
+  subset of their own, so a delegated `roles.manage` can pass on what its
+  holder has and nothing more. Capability strings outside the catalog grant
+  nothing even if written straight into Redis.
+- **Groups**: named groups of viewers with member lists and an optional content
+  scope (collections and/or individual videos), managed from a new Groups tab
+  (`pages/api/admin/groups.js`, `lib/groups.js`). Distinct from viewer tags,
+  which stay free-text labels for picking share recipients.
+- **Group content gating is opt-in and inert by default**, per the
+  optional-features-stay-inert rule: with `GROUP_CONTENT_GATING` unset nothing
+  about any viewer's library changes. Set to `1`, a member sees the union of
+  their groups' collections and videos, enforced at all three points that have
+  to agree — `/api/videos`, `/api/collections` and the `/watch/[id]` GSSP —
+  since filtering the list without gating direct URLs would not be a gate.
+  Groups restrict rather than grant: a group scoped to nothing grants nothing.
+  Viewers in no group are governed by a live `groupDefaultAccess` setting that
+  defaults to the whole library, so enabling the flag never silently blanks an
+  audience. Owners and role-holders bypass gating; share links are never gated.
+- The approval decision behind `/`, `/watch/[id]` and `requireViewer` moved
+  into one shared `viewerAccessFor` helper so the three copies cannot drift.
+  Ordering is unchanged for the common case: an approved viewer with gating off
+  still costs exactly the one Redis read it always did.
+- Removing a viewer now also clears their role assignments and group
+  memberships, matching the existing tag/last-seen cleanup.
+- New Redis keys: `roles`, `user:roles`, `groups`, `user:groups`,
+  `settings:groupDefaultAccess`. New tests: `lib/__tests__/capabilities.test.js`
+  and `lib/__tests__/groups.test.js` (41 cases, including a negative control
+  that a `roles.manage` holder cannot grant a capability they lack).
+
 ## 2026-07-30 — Query Monitor performance panel
 
 - **Opt-in performance widget** for signed-in users, gated entirely behind a
