@@ -7,6 +7,18 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - Three-tier access: **owners** (the fixed `ADMIN_EMAILS` list), **role-holders** (capability-based staff, assigned live from `/admin` → Roles), and **approved viewers** (managed live, no redeploy needed).
 - Logged-in users who aren't approved see a clear "not approved" message instead of any video data.
 - **Server-side admin gate** — `/admin` resolves the caller's capabilities in `getServerSideProps` and redirects anyone holding none before any admin UI is sent; every `/api/admin/*` route also independently returns `403` unless the caller holds that route's capability.
+- **Email verification enforcement** — `REQUIRE_EMAIL_VERIFIED=1` refuses any session whose `email_verified` claim
+  is not boolean `true`, at all 8 sites that read the claim (the `lib/guard.js` chokepoint covering every API route,
+  plus the homepage, `/admin`, `/watch/[id]`, `/activity`, `/s/[id]`, `/b/[id]` and `/api/share-event`). The check is
+  `!== true` so absent/`false`/string claims all deny, and it fails closed. Share and bundle recipients are enforced
+  too, by explicit decision. Unverified users see a "verify your email" notice instead of a login redirect. Off by
+  default because a tenant that doesn't emit the claim would lock everyone out — verify on a preview first.
+- **Self-serve access requests** — a signed-in but unapproved user can file exactly one pending request (with an
+  optional note) from the "Not approved yet" card; repeats are an idempotent no-op, and it is rate-limited to 3/hour
+  per address with the queue itself capped at 200. Admins see the queue at the top of the Viewers tab and approve
+  (optionally assigning groups in the same click) or dismiss; both are audit-logged. Owners get a best-effort email
+  when a request arrives, inert without `RESEND_API_KEY`. The route grants nothing by itself — the most it can do is
+  add the caller's own address to a queue.
 - **Capability-based roles** _(admin, Roles tab)_ — a fixed catalog of capabilities defined in code (`lib/capabilities.js`), grouped into admin-defined roles stored in Redis and assigned per email. Capabilities are per-route and, where read and write differ in privilege, per-method: `videos.read` sees the library while `videos.manage` renames and deletes; `shares.read` lists links while `shares.manage` mints and revokes them. Three properties are load-bearing and unit-tested: `ADMIN_EMAILS` accounts are **owners** who hold the whole catalog, resolved from the env var without reading Redis (so no stored data and no Redis outage can demote them, and changing the list still needs a redeploy); everyone else's capabilities **fail closed** to none if they can't be read; and the **no-escalation rule** means an actor may only create, edit, delete or assign a role whose capabilities are a subset of their own — `roles.manage` passes on what you already hold and nothing more. A capability string outside the catalog grants nothing even if written directly into Redis.
 - Centralized identity logic in one shared helper (`lib/auth.js`), with API-route guards in `lib/guard.js`.
 - **Auto sign-out after 30 minutes of inactivity** (protects a portal left open on a shared machine).
@@ -81,6 +93,12 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - **Groups** _(admin, Groups tab)_ — named, managed groups of viewers, distinct from the free-text tags above: a group has a member list and an optional **content scope** (collections and/or individual videos). Membership is editable from either direction (tick members on the group, or set a person's groups). Whether a scope restricts anything is a deployment decision — with `GROUP_CONTENT_GATING` unset (the default) groups are membership bookkeeping and nobody's library changes; set to `1`, a member sees exactly the union of their groups' collections and videos, enforced at all three points that have to agree (the homepage list, the collection filters, and direct `/watch/…` links). Groups **restrict, they do not grant**: a group scoped to nothing shows its members an empty library, and the tab warns before you save one. A viewer in no group is governed by a live setting (whole library by default, so enabling the flag never silently blanks anyone). Owners and role-holders always bypass gating, share links are never gated, and removing a viewer clears their memberships. Capped at 100 groups, 20 groups per viewer.
 - **Activity / audit log** — the most recent admin actions (viewer add/remove, viewer tag/untag including bulk actions, share create/resend/extend/revoke/unrevoke/purge including bulk actions, private-list add/remove, video rename/delete, collection create/delete, role create/update/delete/assign, group create/update/delete/membership, settings, palette), each with actor and time. Logging is best-effort so it never breaks the underlying action.
 - **Analytics dashboard** — total views, 30-day views, watch time, video count, a 30-day views bar chart, and a most-watched list (from bunny.net video stats + the statistics API), plus a **Share performance by video** list (shares, recipients, views, started, completed, completion rate, avg progress — see Video management above for the same rollup as a per-video collapsible panel).
+- **Scheduled publish/expiry** _(admin, Videos tab)_ — per-video publish windows: hide a video until a date, after a
+  date, or both. Enforced at both the homepage list and direct `/watch/…` URLs (filtering one without the other
+  would not be a gate), with staff bypassing so they can preview what they scheduled. Stated honestly: this is a
+  **publishing convenience, not an embargo** — it fails open (a video is shown if its window can't be read, rather
+  than blanking the library on a Redis blip) and an unparseable date is ignored rather than burying content. For
+  anything that genuinely must not be seen, don't upload it yet or scope it to a group.
 - **Viewer watermark settings** — global on/off default and a viewer-exemption list (see Video playback & security above).
 - **Content-protection panel** — explains the tokenized-playback model and the bunny.net "Block Direct URL File Access" setting.
 
@@ -121,11 +139,12 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - `RESEND_API_KEY` — enable emailing/resending share links via Resend. `MAIL_FROM` optionally sets the from address (a Resend-verified sender; defaults to `onboarding@resend.dev`).
 - `GEO_WHITELIST` / `ADMIN_GEO_WHITELIST` — comma-separated ISO country codes for the viewer / admin geo whitelists (see Authentication & access control above). Each only takes effect once its enforcement toggle is turned on in `/admin` → Settings; off and inert by default.
 - `ADMIN_GEO_BYPASS_EMAILS` — comma-separated admin emails that always skip the admin geo check, regardless of country or the enforcement toggle. A standing safety net armed ahead of travel, not an in-the-moment fix — env var changes need a redeploy. Empty/unset by default.
+- `REQUIRE_EMAIL_VERIFIED` — set to `1` to refuse sessions with an unverified email claim (see Authentication & access
+  control above). Off by default; confirm your tenant emits the claim before enabling.
 - `GROUP_CONTENT_GATING` — set to `1` to make group content scopes actually restrict what members see (see People & oversight above). Unset and inert by default: groups still work as membership bookkeeping.
 - `QUERY_MONITOR_ENABLED` — enables the Query Monitor performance panel for signed-in users (see Platform, quality & observability above). Unset or off by default.
 
 ## Known gaps / not yet implemented
-- **Access-request flow** — no self-serve way for unapproved users to request access; admins must know who to add.
-- **`email_verified` enforcement** — access checks trust the email claim; pair with Auth0 sign-up controls (see Security notes in the README).
+- **`email_verified` enforcement is opt-in** — implemented and tested, but off unless `REQUIRE_EMAIL_VERIFIED=1`, because no code can prove a given Auth0 tenant emits the claim. Confirm on a preview, then turn it on.
 - **Owner list is still env-frozen** — capability-based staff are managed live in `/admin` → Roles, but the owner set itself (`ADMIN_EMAILS`) is deliberately env-only: an admin-writable owner list is a bigger prize than an env var, and keeping it out of Redis is what makes self-lockout and privilege escalation structurally impossible rather than merely guarded against.
-- **Captions/transcripts, comments/ratings, scheduled publish/expiry** — not implemented.
+- **Captions/transcripts, comments/ratings** — not implemented.

@@ -55,6 +55,27 @@ New rows (2026-08-30):
 | `/api/admin/roles` | GET, POST, PUT, PATCH, DELETE | `requireCapability(roles.manage)` + rate limit 20/min on mutations | Every mutating branch additionally enforces the subset rule (`canDelegate`): PUT checks the role's current AND new capability sets, PATCH checks the union of roles added and removed. 403 body names the refused capabilities — deliberate: it tells an actor what they lack, never what anyone else holds |
 | `/api/admin/groups` | GET, POST, PUT, PATCH, DELETE | `requireCapability(groups.manage)` + rate limit 20/min on mutations | PATCH carries three actions: `set-members`, `set-groups`, `set-default-access` |
 
+Further rows (2026-08-31):
+
+| Surface | Methods | Guard | Notes |
+|---|---|---|---|
+| `/api/request-access` | POST | **session-only** (+ `trustedEmail`) — deliberate | The one route intentionally reachable by a signed-in but UNAPPROVED user; that is the feature. It grants nothing: the most it can do is put the caller's own address in a queue. Rate-limited 3/hour per email, queue capped at 200, repeats idempotent. Refuses callers who already have access (they are asking about themselves, so it leaks nothing) |
+| `/api/admin/access-requests` | GET, POST, DELETE | `requireCapability(viewers.read)` on GET, `viewers.manage` on POST/DELETE | Read the queue vs act on it, the same split the Viewers tab already uses |
+| `/api/admin/schedule` | POST | `requireCapability(videos.manage)` | POST-only on purpose: windows are READ back with the video list in `/api/admin/videos`, so the tab needs one fetch, not two |
+
+**Email-verification overlay (2026-08-31):** when `REQUIRE_EMAIL_VERIFIED=1`,
+every row above and below additionally requires a boolean-`true` `email_verified`
+claim, because all of them resolve identity through `trustedEmail` (I1b). This
+never widens a row — it only turns some previously-allowed sessions into
+not-signed-in. The `/s/[id]` and `/b/[id]` rows are included by explicit owner
+decision; see the CHANGELOG entry for the reasoning.
+
+Automated proof of the deny half now runs in CI, not only against a live
+deployment: `lib/__tests__/routeGuards.test.js` calls every guarded route with
+every HTTP method and asserts an anonymous caller can only be refused
+(401/403/405). Its negative control has been executed — removing a
+`requireCapability` call turns the suite red.
+
 Changed rows: `/admin` (page) now admits any **staff** — an owner or anyone
 holding ≥ 1 capability — instead of `ADMIN_EMAILS` only; props gained the
 caller's OWN capability list and owner flag (never anyone else's). `/`,

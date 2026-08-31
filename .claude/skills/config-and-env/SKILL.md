@@ -76,6 +76,7 @@ from repo root — re-run it before trusting this table).
 | Web Push | **BOTH** `NEXT_PUBLIC_VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` set (`lib/push.js:5-7`) | Notify button and broadcast composer hidden; `/api/push/subscribe` and `/api/admin/broadcast` return 400; `sendToAll`/`announceNewVideos` no-op |
 | Share-link email | `RESEND_API_KEY` set (`lib/mail.js:4-6`) | "Email the link" checkbox and "Resend email" button hidden; nothing ever sent |
 | Thumbnails | `BUNNY_CDN_HOSTNAME` set | Title list instead of grid (playback unaffected) |
+| Email-verification enforcement | `REQUIRE_EMAIL_VERIFIED=1` | Access trusts the session email claim as-is — the pre-2026-08-31 behaviour. Note this is the one "inert" default that leaves a security gap open rather than a feature switched off: turn it on as soon as the claim is confirmed on a preview |
 | Group content gating | `GROUP_CONTENT_GATING=1` | Groups are membership bookkeeping only — scopes are recorded in /admin → Groups but restrict nobody's library |
 | Sentry capture | Respective DSN set | Completely inert (SDK never initialized) |
 | Sentry source maps | `SENTRY_AUTH_TOKEN` (+ org/project) at build | Maps not uploaded; stack traces are minified |

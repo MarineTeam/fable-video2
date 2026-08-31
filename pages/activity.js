@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import AppShell from '../components/AppShell';
 import { auth0 } from '../lib/auth0';
-import { normalizeEmail } from '../lib/auth';
+import { normalizeEmail, trustedEmail } from '../lib/auth';
 import { viewerAccessFor } from '../lib/guard';
 import { CAP } from '../lib/capabilities';
 import { withMonitorPage } from '../lib/monitor';
@@ -14,7 +14,19 @@ async function gssp({ req, res }) {
   if (!session) {
     return { redirect: { destination: '/auth/login?returnTo=/activity', permanent: false } };
   }
-  const email = normalizeEmail(session.user.email);
+  const email = trustedEmail(session.user);
+  if (!email) {
+    const claimed = normalizeEmail(session.user.email);
+    return {
+      props: {
+        user: { email: claimed, name: session.user.name || claimed },
+        isAdmin: false,
+        canLookUpOthers: false,
+        approved: false,
+        unverified: true,
+      },
+    };
+  }
   const { approved, owner, staff, capabilities } = await viewerAccessFor(email);
   // The lookup dropdown needs BOTH underlying routes, so it is offered only to
   // someone who holds both capabilities — otherwise it renders a control that
@@ -58,7 +70,7 @@ function fmtWhen(iso) {
   return d.toLocaleString();
 }
 
-export default function Activity({ user, isAdmin: admin, canLookUpOthers, approved }) {
+export default function Activity({ user, isAdmin: admin, canLookUpOthers, approved, unverified }) {
   const [viewers, setViewers] = useState([]);
   const [selected, setSelected] = useState('__me__');
   const [items, setItems] = useState(null);
@@ -80,6 +92,20 @@ export default function Activity({ user, isAdmin: admin, canLookUpOthers, approv
       .then((d) => setItems(d.items || []))
       .catch((err) => setError(err.message));
   }, [approved, selected]);
+
+  if (unverified) {
+    return (
+      <AppShell user={user} isAdmin={false} approved={false}>
+        <div className="card card-pad notice">
+          <h1>Verify your email</h1>
+          <p>
+            You&apos;re signed in as <strong>{user.email}</strong>, but that address hasn&apos;t been
+            verified yet. Check your inbox for the verification link, then reload this page.
+          </p>
+        </div>
+      </AppShell>
+    );
+  }
 
   if (!approved) {
     return (

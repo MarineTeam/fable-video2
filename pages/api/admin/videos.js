@@ -9,6 +9,7 @@ import {
 } from '../../../lib/bunny';
 import { redis, k } from '../../../lib/redis';
 import { applyOrder } from '../../../lib/order';
+import { loadSchedule, clearVideoWindow } from '../../../lib/scheduleStore';
 import { announceNewVideos } from '../../../lib/push';
 import { logAction } from '../../../lib/audit';
 import { getVideoModes, setVideoMode, clampWatermarkMode } from '../../../lib/watermark';
@@ -27,6 +28,9 @@ async function handler(req, res) {
       const orderRaw = await r.get(k('order')).catch(() => null);
       const ordered = applyOrder(items, Array.isArray(orderRaw) ? orderRaw : []);
       const watermarkModes = await getVideoModes(ordered.map((v) => v.guid));
+      // Served with the list, like watermark modes, so the Videos tab renders
+      // publish-window badges without a second round trip.
+      const schedule = await loadSchedule();
       return res.json({
         videos: ordered.map((v) => ({
           guid: v.guid,
@@ -39,6 +43,7 @@ async function handler(req, res) {
           dateUploaded: v.dateUploaded || null,
           thumbnail: thumbnailUrl(v),
           watermarkMode: watermarkModes[v.guid] || 'default',
+          schedule: schedule[v.guid] || null,
         })),
       });
     } catch {
@@ -85,6 +90,8 @@ async function handler(req, res) {
           await r.set(k('order'), orderRaw.filter((g) => g !== id));
         }
       } catch {}
+      // And from the publish-window hash, same no-orphans contract.
+      await clearVideoWindow(id);
       await logAction(admin, 'video.delete', id);
       return res.json({ ok: true });
     } catch {

@@ -5,6 +5,8 @@ import { listVideos, thumbnailUrl, isPlayable } from '../../lib/bunny';
 import { redis, k } from '../../lib/redis';
 import { applyOrder } from '../../lib/order';
 import { contentScopeFor, filterVideosByScope } from '../../lib/groups';
+import { filterVideosBySchedule } from '../../lib/schedule';
+import { loadSchedule } from '../../lib/scheduleStore';
 
 const PAGE_SIZE = 10;
 
@@ -25,17 +27,24 @@ async function handler(req, res) {
   // GROUP_CONTENT_GATING=1, and always unrestricted for staff — see
   // lib/groups.js. This is one of the three enforcement points that have to
   // agree; the others are /api/collections and the /watch/[id] GSSP.
-  const [countRaw, orderRaw, scope] = await Promise.all([
+  const staff = viewer.admin || viewer.staff;
+  const [countRaw, orderRaw, scope, schedule] = await Promise.all([
     r.get(k('settings:homeCount')).catch(() => null),
     r.get(k('order')).catch(() => null),
-    contentScopeFor(viewer.email, { staff: viewer.admin || viewer.staff }),
+    contentScopeFor(viewer.email, { staff }),
+    // Staff see unpublished and expired videos so they can find and fix them;
+    // for everyone else the window applies. Paired with the /watch/[id] check.
+    staff ? Promise.resolve({}) : loadSchedule(),
   ]);
   const homeCount = Math.min(Math.max(parseInt(countRaw, 10) || 48, 1), 200);
   const order = Array.isArray(orderRaw) ? orderRaw : [];
 
   try {
     const data = await listVideos({ page: 1, perPage: Math.min(homeCount, 100), search, collection });
-    const playable = filterVideosByScope((data?.items || []).filter(isPlayable), scope);
+    const playable = filterVideosBySchedule(
+      filterVideosByScope((data?.items || []).filter(isPlayable), scope),
+      schedule
+    );
     const capped = applyOrder(playable, order).slice(0, homeCount);
 
     const start = (page - 1) * PAGE_SIZE;

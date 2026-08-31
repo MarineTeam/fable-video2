@@ -13,11 +13,12 @@ import {
   XIcon,
 } from '../components/icons';
 import { auth0 } from '../lib/auth0';
-import { normalizeEmail } from '../lib/auth';
+import { trustedEmail } from '../lib/auth';
 import { resolveActor } from '../lib/guard';
 import { CAP } from '../lib/capabilities';
 import { PRESETS, COLOR_KEYS, applyTheme, validateTheme, THEME_STORAGE_KEY } from '../lib/theme';
 import { rollupSharesByVideo } from '../lib/videoAnalytics';
+import { windowState } from '../lib/schedule';
 import { isGeoAllowed } from '../lib/geo';
 import { withMonitorPage } from '../lib/monitor';
 import { resetMonitorCalls } from '../lib/monitorClient';
@@ -28,7 +29,12 @@ async function gssp({ req, res }) {
   if (!session) {
     return { redirect: { destination: '/auth/login?returnTo=/admin', permanent: false } };
   }
-  const email = normalizeEmail(session.user.email);
+  // Unverified sessions are not signed in as far as access is concerned; '/'
+  // explains why rather than looping through login.
+  const email = trustedEmail(session.user);
+  if (!email) {
+    return { redirect: { destination: '/', permanent: false } };
+  }
   // The admin area is open to owners (ADMIN_EMAILS) and to anyone holding at
   // least one capability. Which tabs they see is filtered from the same set
   // below — that filtering is a convenience, never the gate: every route
@@ -242,6 +248,9 @@ function VideosTab({
   const [editing, setEditing] = useState(null); // { guid, title }
   const [shareFor, setShareFor] = useState(null); // guid
   const [privateListFor, setPrivateListFor] = useState(null); // guid
+  const [scheduleFor, setScheduleFor] = useState(null); // guid
+  const [scheduleDraft, setScheduleDraft] = useState({ from: '', until: '' });
+  const [scheduleError, setScheduleError] = useState('');
   const [copiedId, setCopiedId] = useState('');
   const [newCollection, setNewCollection] = useState('');
   const [collectionShareNotice, setCollectionShareNotice] = useState('');
@@ -368,6 +377,15 @@ function VideosTab({
     setCollectionShareNotice('');
   }
 
+  function openSchedule(guid, current) {
+    setScheduleError('');
+    setScheduleFor(scheduleFor === guid ? null : guid);
+    setScheduleDraft({
+      from: current?.from ? current.from.slice(0, 16) : '',
+      until: current?.until ? current.until.slice(0, 16) : '',
+    });
+  }
+
   function toggleAnalytics(guid) {
     setOpenAnalytics((prev) => {
       const next = new Set(prev);
@@ -375,6 +393,16 @@ function VideosTab({
       else next.add(guid);
       return next;
     });
+  }
+
+  async function saveSchedule(guid, from, until) {
+    try {
+      await api('/api/admin/schedule', { method: 'POST', body: { guid, from, until } });
+      setScheduleFor(null);
+      reloadVideos();
+    } catch (err) {
+      setScheduleError(err.message);
+    }
   }
 
   async function setVideoWatermark(guid, watermarkMode) {
@@ -730,6 +758,23 @@ function VideosTab({
             >
               Private list
             </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => openSchedule(v.guid, v.schedule)}
+              title="Hide this video until a date, after a date, or both"
+            >
+              Schedule
+              {windowState(v.schedule) === 'scheduled' ? (
+                <span className="badge badge-warn">Scheduled</span>
+              ) : null}
+              {windowState(v.schedule) === 'expired' ? (
+                <span className="badge badge-err">Expired</span>
+              ) : null}
+              {windowState(v.schedule) === 'live' ? (
+                <span className="badge badge-ok">Windowed</span>
+              ) : null}
+            </button>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => toggleAnalytics(v.guid)}>
               Analytics
             </button>
@@ -757,6 +802,60 @@ function VideosTab({
                 viewers={viewers}
                 onChanged={() => reloadShares()}
               />
+            ) : null}
+            {scheduleFor === v.guid ? (
+              <div className="card card-pad">
+                <h3 className="section-title">Publish window</h3>
+                <p className="muted">
+                  Leave both blank for always visible. Staff always see the video regardless, so
+                  you can preview what you scheduled. This hides a video from viewers — it is a
+                  publishing convenience, not an embargo.
+                </p>
+                <div className="field-row">
+                  <label className="field-block">
+                    Visible from
+                    <input
+                      type="datetime-local"
+                      className="input"
+                      value={scheduleDraft.from}
+                      onChange={(e) => setScheduleDraft({ ...scheduleDraft, from: e.target.value })}
+                    />
+                  </label>
+                  <label className="field-block">
+                    Hidden again from
+                    <input
+                      type="datetime-local"
+                      className="input"
+                      value={scheduleDraft.until}
+                      onChange={(e) => setScheduleDraft({ ...scheduleDraft, until: e.target.value })}
+                    />
+                  </label>
+                </div>
+                {scheduleError ? <p className="error-text">{scheduleError}</p> : null}
+                <div className="field-row">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => saveSchedule(v.guid, scheduleDraft.from, scheduleDraft.until)}
+                  >
+                    Save window
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => saveSchedule(v.guid, '', '')}
+                  >
+                    Clear
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setScheduleFor(null)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
             ) : null}
             {openAnalytics.has(v.guid) ? (
               <VideoAnalyticsPanel stats={shareRollup[v.guid]} />
@@ -863,6 +962,59 @@ function VideoAnalyticsPanel({ stats }) {
 // inline version since it drives a raw textarea, not an array.
 function AddViewersByTag({ viewers, onAdd }) {
   const [tagPick, setTagPick] = useState('');
+  const loadRequests = useCallback(async () => {
+    try {
+      setRequests((await api('/api/admin/access-requests')).requests || []);
+    } catch {
+      // A staff member without viewers.read simply has no queue to show.
+    }
+  }, []);
+
+  useEffect(() => {
+    loadRequests();
+    // The group picker is a convenience on approval; silently absent for
+    // someone without groups.manage, same idiom as the tab loaders above.
+    api('/api/admin/groups')
+      .then((d) => setGroups(d.groups || []))
+      .catch(() => {});
+  }, [loadRequests]);
+
+  async function approveRequest(target) {
+    const picked = [...(approveGroups[target] || [])];
+    try {
+      await api('/api/admin/access-requests', {
+        method: 'POST',
+        body: { email: target, groupIds: picked },
+      });
+      setStatus(`Approved ${target}.`);
+      loadRequests();
+      reload();
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
+  async function dismissRequest(target) {
+    if (!window.confirm(`Dismiss the access request from ${target}? They can ask again later.`)) {
+      return;
+    }
+    try {
+      await api('/api/admin/access-requests', { method: 'DELETE', body: { email: target } });
+      loadRequests();
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
+  function toggleApproveGroup(target, groupId) {
+    setApproveGroups((prev) => {
+      const next = new Set(prev[target] || []);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return { ...prev, [target]: next };
+    });
+  }
+
   const availableTags = useMemo(
     () => [...new Set((viewers || []).flatMap((v) => v.tags || []))].sort(),
     [viewers]
@@ -1265,6 +1417,9 @@ function BulkShareForm({ videoIds, mailOn, viewers, onCreated }) {
 // --------------------------------------------------------------- Viewers tab
 
 function ViewersTab({ viewers, reload }) {
+  const [requests, setRequests] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [approveGroups, setApproveGroups] = useState({}); // email -> Set(groupId)
   const [email, setEmail] = useState('');
   const [bulk, setBulk] = useState('');
   const [showBulk, setShowBulk] = useState(false);
@@ -1367,6 +1522,57 @@ function ViewersTab({ viewers, reload }) {
 
   return (
     <div className="tab-body">
+      {requests.length > 0 ? (
+        <div className="card card-pad">
+          <h2 className="section-title">
+            Pending access requests <span className="tab-badge">{requests.length}</span>
+          </h2>
+          <div className="admin-rows">
+            {requests.map((r) => (
+              <div key={r.email} className="admin-row">
+                <div className="row-main">
+                  <span className="row-title">{r.email}</span>
+                  <span className="row-meta muted">
+                    Asked {fmtWhen(r.at)}
+                    {r.note ? ` · “${r.note}”` : ''}
+                  </span>
+                  {groups.length > 0 ? (
+                    <div className="chips">
+                      {groups.map((g) => (
+                        <label key={g.id} className="field-row">
+                          <input
+                            type="checkbox"
+                            checked={(approveGroups[r.email] || new Set()).has(g.id)}
+                            onChange={() => toggleApproveGroup(r.email, g.id)}
+                          />
+                          <span>{g.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="row-meta">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => approveRequest(r.email)}
+                  >
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => dismissRequest(r.email)}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       <div className="card card-pad">
         <h2 className="section-title">Approved viewers</h2>
         <form className="inline-form" onSubmit={add}>

@@ -3,6 +3,54 @@
 All notable changes to the Marine Video Portal. Dates are UTC, matching the
 commit history (`git log --oneline`).
 
+## 2026-08-31 — Email verification, access requests, scheduling, guard tests
+
+- **`email_verified` enforcement** (`lib/auth.js` `trustedEmail`), the project's
+  longest-standing security gap. A session whose claim is not boolean `true` is
+  treated as not signed in. The `!== true` shape is the point: absent, `false`,
+  and the string `"true"` all deny. Wired at all 8 sites that read the claim —
+  the `lib/guard.js` chokepoint (covering every API route), `pages/index.js`,
+  `pages/admin.js`, `pages/watch/[id].js`, `pages/activity.js`,
+  `pages/s/[id].js`, `pages/b/[id].js`, `pages/api/share-event.js`. The
+  campaign document predates the last three; they were found by re-running its
+  Phase 0 greps rather than trusting its file list.
+- Share and bundle recipients are enforced too, by explicit decision: they are
+  the users least likely to have verified emails, which is exactly why an
+  exemption would leave a forged unverified session able to match a link's
+  recipient. Unverified users get a "verify your email" notice, not a login
+  redirect, which would loop for an already-signed-in user.
+- Enforcement is **off unless `REQUIRE_EMAIL_VERIFIED=1`**. No code in this repo
+  can prove a given Auth0 tenant emits the claim, and enabling it blind would
+  lock out every user including every owner, with no admin UI left to fix it.
+  Confirm on a preview (`/auth/profile`), then turn it on. Unset is a staging
+  position, not a resting place.
+- **Self-serve access requests**: `pages/api/request-access.js` — the one route
+  deliberately reachable by a signed-in, unapproved user. It grants nothing;
+  the most it can do is queue the caller's own address. Rate-limited 3/hour per
+  email, queue capped at 200, repeat requests idempotent. Admins work the queue
+  from the top of the Viewers tab (approve, optionally assigning groups in the
+  same click, or dismiss), both audit-logged, with a best-effort owner email
+  that is inert without `RESEND_API_KEY`.
+- **Scheduled publish/expiry**: per-video windows in `lib/schedule.js` (pure) +
+  `lib/scheduleStore.js` (Redis), enforced at both `/api/videos` and the
+  `/watch/[id]` GSSP, staff bypassing. Documented honestly as a publishing
+  convenience rather than an embargo: it fails OPEN, because blanking the
+  library on a Redis blip is the availability failure the architecture contract
+  rules out, and the video is behind the viewer gate regardless.
+- The pure/store split exists because the admin Videos tab calls `windowState()`
+  during render; a single module importing `lib/redis` pulled `lib/monitor` and
+  then `node:async_hooks` into the browser bundle and failed the client build.
+  Mirrors the existing `capabilities.js` / `roles.js` split.
+- **Route-handler denial tests** (`lib/__tests__/routeGuards.test.js`): every
+  guarded route called with every method, asserting an anonymous caller can only
+  ever be refused (401/403/405) — never 200, never 500. Deliberately no
+  route→method table, which would drift and quietly stop testing anything. The
+  negative control was run: deleting a `requireCapability` call makes the suite
+  report `admin/audit answered 200 to an anonymous GET`. Vitest's include
+  pattern already covers this file; no config change was needed.
+- New Redis keys: `access-requests`, `schedule`. New env var:
+  `REQUIRE_EMAIL_VERIFIED`. Suite grew 168 → 247 tests across 17 files.
+
 ## 2026-08-30 — Capability-based roles and viewer groups
 
 - **Roles**: admin access is no longer a binary env-var check. A fixed catalog
