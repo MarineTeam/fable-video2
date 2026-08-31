@@ -22,80 +22,67 @@ documented failure archaeology.
 
 ## 1. Product features (from FEATURES.md "Known gaps" — verified present, 2026-07-18)
 
-### 1a. Access-request flow — status: OPEN
-- **Falls short:** unapproved users hit "Not approved" (`pages/index.js`) with
-  no path forward; admins must learn who to add out-of-band.
-- **Asset:** every piece already exists in another form — the approved-viewers
-  SET and its admin tab (`pages/api/admin/viewers.js`), the audit log for
-  traceability, and optional push/email for notifying admins.
-- **First three steps:** (1) add a "Request access" button to the not-approved
-  card posting to a new `pages/api/request-access.js` (session-only guard —
-  the requester is authenticated but unapproved; rate-limit it; store under a
-  new `fable2:access-requests` key, capped); (2) surface pending requests in
-  the Viewers tab with one-click approve (moves email into the viewers SET,
-  audit-logged); (3) optional push/email notification to admins, inert unless
-  configured, per house idiom.
-- **Result when:** an unapproved login can file exactly one pending request
-  (repeat attempts 429/no-op); an admin approves it from /admin without
-  redeploy; smoke-probe still passes (the new route denies anonymous callers);
-  the request key appears in redis-inspect and the entry-point matrix gains
-  its row.
+### 1a. Access-request flow — status: SHIPPED 2026-08-31, retired from this list
+- `pages/api/request-access.js` (session-only guard, 3/hour per email, queue
+  capped at 200, repeats idempotent) plus a pending queue at the top of the
+  Viewers tab with approve — optionally assigning groups in the same click —
+  and dismiss, both audit-logged. Owner email notification is best-effort and
+  inert without `RESEND_API_KEY`.
+- Milestone met: the new route has a row in the entry-point matrix, is covered
+  by the CI denial suite, and the `access-requests` key is in the data-model
+  inventory. Note the ordering dependency that shaped it: self-serve requests
+  plus an unverified email claim would let someone request access as an address
+  that isn't theirs, which is why `trustedEmail` landed in the same change.
 
-### 1b. In-app admin management — status: OPEN, higher risk
-- **Falls short:** `ADMIN_EMAILS` is env-frozen (`lib/auth.js`); changing
-  admins needs a redeploy.
-- **Asset:** the settings-tab + Redis pattern. **Named risks that make this
-  candidate, not planned:** self-lockout (removing the last admin) and
-  privilege escalation surface (an admin-writable admin list is a bigger
-  prize than an env var). Design obligation: env list stays as the
-  non-removable bootstrap set; Redis can only ADD admins; every change
-  audit-logged.
-- **First three steps:** (1) write the threat analysis using
-  security-analysis-toolkit recipes 1 and 5 BEFORE any code; (2) extend
-  `isAdmin` to check env-set ∪ Redis-set with fail-closed Redis handling —
-  note this touches the one file identity logic lives in, maximally
-  security-touching; (3) tests first in `lib/__tests__/auth.test.js`.
-- **Result when:** an env-listed admin can grant/revoke Redis-listed admins
-  live; no sequence of UI actions can remove the last env admin (test proves
-  it); matrix and audit rows exist.
+### 1b. In-app admin management — status: SHIPPED 2026-08-30, retired from this list
+- Delivered as **capability-based roles**, not as an editable admin list: a
+  fixed catalog in `lib/capabilities.js`, admin-defined roles in Redis
+  (`lib/roles.js`, `/admin` → Roles), and `requireCapability` on every admin
+  route. Both named risks were designed out rather than guarded against —
+  self-lockout is impossible because `ADMIN_EMAILS` stays the env-only,
+  non-removable owner set (Redis can only ADD privilege), and the escalation
+  surface is capped by the subset rule `canDelegate`, so a delegated
+  `roles.manage` can pass on only what its holder already has.
+- Shipped alongside **groups** (`lib/groups.js`), whose content gating is an
+  env-gated experiment (`GROUP_CONTENT_GATING`, inert by default) — the one
+  part of that change still awaiting a real-deployment result. Its milestone,
+  if anyone picks it up: run a week with gating on and confirm no approved
+  viewer loses access they should have had, then decide whether `closed`
+  becomes a sane default for the ungrouped case.
+- Story moved to FEATURES.md; see the architecture contract (§1.1, I2/I2b/I2c)
+  for the invariants it introduced.
 
-### 1c. Captions/transcripts, scheduled publish/expiry — status: OPEN, unscoped
-- **Falls short:** FEATURES.md lists both as not implemented.
-- **Asset:** captions — Bunny Stream exposes caption endpoints on the same
-  API this app already wraps in `lib/bunny.js` (vendor capability,
-  **unverified from this repo** — confirm against Bunny docs before
-  scoping); scheduling — the `isPlayable` filter in `pages/api/videos.js` is
-  a natural single gating point, and Redis-stored per-video metadata is an
-  established pattern.
-- **First three steps (scheduling):** (1) decide the storage shape (e.g.
-  `fable2:schedule` hash guid→{from,until}); (2) filter in `/api/videos` and
-  guard direct `/watch/[id]` access the same way (both, or it's not a gate);
-  (3) admin UI in the Videos tab.
-- **Result when:** a video with a future publish date is invisible to viewers
-  on the homepage AND direct-URL access, then appears without any deploy;
-  a test pins the filter logic.
+### 1c. Captions/transcripts — status: OPEN, unscoped (scheduling half SHIPPED)
+- **Scheduled publish/expiry shipped 2026-08-31**: `lib/schedule.js` (pure) +
+  `lib/scheduleStore.js` (Redis), enforced at both `/api/videos` and the
+  `/watch/[id]` GSSP, with an admin editor in the Videos tab. Milestone met —
+  a future-dated video is invisible on the homepage AND on direct URL, appears
+  without a deploy, and `lib/__tests__/schedule.test.js` pins the window logic.
+  One thing deliberately NOT claimed: it fails open and is documented as a
+  publishing convenience, not an embargo. If someone later needs a true
+  embargo, that is a new, differently-shaped problem — don't retrofit it here
+  by flipping the failure mode, which would put library availability behind a
+  Redis read.
+- **Captions/transcripts remain OPEN and unscoped.** Bunny Stream exposes
+  caption endpoints on the same API `lib/bunny.js` already wraps, but that is a
+  **vendor capability still unverified from this repo** — confirm against
+  Bunny's documentation before scoping.
 
-## 2. Verification depth — status: OPEN (owner-selected priority)
-
-- **Falls short (verified):** 30 unit tests cover 4 pure-logic modules
-  (`lib/__tests__/`); zero coverage of API handlers, guards-as-wired, or
-  GSSPs (GSSP = `getServerSideProps`, Next.js server-side page code; glossary
-  in the reference skill). The strongest invariants (deny-by-default) are proven only by the
-  runtime smoke-probe, not in CI.
-- **Asset:** handlers are small and take plain `(req, res)`; the
-  security-analysis-toolkit entry-point matrix is a ready-made coverage
-  checklist; vitest ships mocking (`vi.mock`) so no new dependencies are
-  needed — staying inside change-control's dependency discipline.
-- **First three steps:** (1) prototype ONE handler test — mock `lib/auth0`'s
-  `getSession` to return null and assert `/api/admin/videos` responds 403
-  without touching Redis/Bunny (also requires widening `vitest.config.js`'s
-  include pattern or placing route tests under `lib/__tests__/` — config
-  change goes through change-control); (2) generalize into a tiny req/res
-  stub helper; (3) generate one denial test per matrix row.
-- **Result when (falsifiable by design):** every matrix row has an automated
-  denial test, and **deliberately deleting a `requireAdmin` call on a scratch
-  branch turns CI red**. If that sabotage passes CI, the suite is decorative —
-  the milestone explicitly requires running this negative control.
+## 2. Verification depth — status: SHIPPED 2026-08-31, retired from this list
+- `lib/__tests__/routeGuards.test.js` calls every guarded route with every HTTP
+  method and asserts an anonymous caller can only be refused (401/403/405),
+  never 200 and never 500. No `vitest.config.js` change was needed after all —
+  the existing `lib/__tests__/**` include pattern already covers it, so the
+  change-control config gate this item anticipated never applied.
+- The milestone was falsifiable by design and was actually run: deleting a
+  `requireCapability` call turns the suite red with
+  `admin/audit answered 200 to an anonymous GET`. The suite is therefore not
+  decorative. Re-run that sabotage by hand whenever the file changes.
+- What is still NOT covered, stated plainly so nobody reads more into this than
+  it proves: the suite tests the *anonymous* denial half only. It does not test
+  that a signed-in caller holding capability X can reach route X and is refused
+  route Y — that needs session and Redis fixtures, and is the obvious next step
+  if anyone wants to extend it.
 
 ## 3. Stronger content protection — status: OPEN, candidate
 

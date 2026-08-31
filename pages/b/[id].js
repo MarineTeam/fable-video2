@@ -1,6 +1,6 @@
 import ShareShell from '../../components/ShareShell';
 import { auth0 } from '../../lib/auth0';
-import { isAdmin, normalizeEmail } from '../../lib/auth';
+import { isAdmin, normalizeEmail, trustedEmail } from '../../lib/auth';
 import { baseUrl } from '../../lib/share';
 import { loadBundle, liveBundleItems } from '../../lib/bundle';
 import { isGeoAllowed } from '../../lib/geo';
@@ -23,7 +23,11 @@ async function gssp({ req, res, params }) {
       redirect: { destination: `/auth/login?returnTo=${encodeURIComponent(`/b/${id}`)}`, permanent: false },
     };
   }
-  const email = normalizeEmail(session.user.email);
+  // Same enforcement as /s/[id] — see the note there.
+  const email = trustedEmail(session.user);
+  if (!email) {
+    return { props: { state: 'unverified', user: { email: normalizeEmail(session.user.email) } } };
+  }
   const user = { email };
 
   if (!(await isGeoAllowed(req, { admin: isAdmin(email), email }))) {
@@ -56,6 +60,19 @@ export default function Bundle({ state, user, items }) {
         <div className="card card-pad notice">
           <h1>Link unavailable</h1>
           <p>This share link has expired or doesn&apos;t exist.</p>
+        </div>
+      </ShareShell>
+    );
+  }
+  if (state === 'unverified') {
+    return (
+      <ShareShell user={user}>
+        <div className="card card-pad notice">
+          <h1>Verify your email</h1>
+          <p>
+            You&apos;re signed in as <strong>{user?.email}</strong>, but that address hasn&apos;t
+            been verified yet. Check your inbox for the verification link, then reload this page.
+          </p>
         </div>
       </ShareShell>
     );

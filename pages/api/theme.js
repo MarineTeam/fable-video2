@@ -1,5 +1,6 @@
 import { withMonitorApi } from "../../lib/monitor";
-import { requireAdmin } from '../../lib/guard';
+import { requireCapability } from '../../lib/guard';
+import { CAP } from '../../lib/capabilities';
 import { redis, k } from '../../lib/redis';
 import { DEFAULT_THEME, validateTheme } from '../../lib/theme';
 import { logAction } from '../../lib/audit';
@@ -18,7 +19,7 @@ async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    const admin = await requireAdmin(req, res);
+    const admin = await requireCapability(req, res, CAP.SETTINGS_MANAGE);
     if (!admin) return;
     const theme = validateTheme(req.body);
     if (!theme) return res.status(400).json({ error: 'Invalid palette' });

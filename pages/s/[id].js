@@ -1,7 +1,7 @@
 import ResumablePlayer from '../../components/ResumablePlayer';
 import ShareShell from '../../components/ShareShell';
 import { auth0 } from '../../lib/auth0';
-import { isAdmin, normalizeEmail } from '../../lib/auth';
+import { isAdmin, normalizeEmail, trustedEmail } from '../../lib/auth';
 import { redis, k } from '../../lib/redis';
 import { getVideo, signedEmbedUrl } from '../../lib/bunny';
 import { isShareActive } from '../../lib/share';
@@ -21,7 +21,14 @@ async function gssp({ req, res, params }) {
       redirect: { destination: `/auth/login?returnTo=${encodeURIComponent(`/s/${id}`)}`, permanent: false },
     };
   }
-  const email = normalizeEmail(session.user.email);
+  // Enforced here too, by explicit decision: share recipients are exactly the
+  // users least likely to have verified emails, and leaving them out would keep
+  // a slice of the hole open — a forged unverified session could match a link's
+  // recipient address.
+  const email = trustedEmail(session.user);
+  if (!email) {
+    return { props: { state: 'unverified', user: { email: normalizeEmail(session.user.email) } } };
+  }
   const user = { email };
 
   if (!(await isGeoAllowed(req, { admin: isAdmin(email), email }))) {
@@ -107,6 +114,18 @@ export default function Share({ state, user, title, embedUrl, videoId, expiresAt
       </ShareShell>
     );
   }
+  if (state === 'unverified') {
+    return (
+      <ShareShell>
+        <h1>Verify your email</h1>
+        <p>
+          You&apos;re signed in as <strong>{user?.email}</strong>, but that address hasn&apos;t been
+          verified yet. Check your inbox for the verification link, then reload this page.
+        </p>
+      </ShareShell>
+    );
+  }
+
   if (state === 'mismatch') {
     return (
       <ShareShell user={user}>

@@ -13,9 +13,12 @@ import {
   XIcon,
 } from '../components/icons';
 import { auth0 } from '../lib/auth0';
-import { isAdmin, normalizeEmail } from '../lib/auth';
+import { trustedEmail } from '../lib/auth';
+import { resolveActor } from '../lib/guard';
+import { CAP } from '../lib/capabilities';
 import { PRESETS, COLOR_KEYS, applyTheme, validateTheme, THEME_STORAGE_KEY } from '../lib/theme';
 import { rollupSharesByVideo } from '../lib/videoAnalytics';
+import { windowState } from '../lib/schedule';
 import { isGeoAllowed } from '../lib/geo';
 import { withMonitorPage } from '../lib/monitor';
 import { resetMonitorCalls } from '../lib/monitorClient';
@@ -26,8 +29,18 @@ async function gssp({ req, res }) {
   if (!session) {
     return { redirect: { destination: '/auth/login?returnTo=/admin', permanent: false } };
   }
-  const email = normalizeEmail(session.user.email);
-  if (!isAdmin(email)) {
+  // Unverified sessions are not signed in as far as access is concerned; '/'
+  // explains why rather than looping through login.
+  const email = trustedEmail(session.user);
+  if (!email) {
+    return { redirect: { destination: '/', permanent: false } };
+  }
+  // The admin area is open to owners (ADMIN_EMAILS) and to anyone holding at
+  // least one capability. Which tabs they see is filtered from the same set
+  // below — that filtering is a convenience, never the gate: every route
+  // re-checks the capability server-side on each call.
+  const actor = await resolveActor(email);
+  if (!actor.staff) {
     return { redirect: { destination: '/', permanent: false } };
   }
   if (!(await isGeoAllowed(req, { admin: true, email }))) {
@@ -38,6 +51,8 @@ async function gssp({ req, res }) {
       user: { email, name: session.user.name || email },
       mailOn: Boolean(process.env.RESEND_API_KEY),
       pushOn: Boolean(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY),
+      owner: actor.owner,
+      capabilities: actor.capabilities,
     },
   };
 }
@@ -71,10 +86,29 @@ function fmtWhen(iso) {
 const isEncodingStatus = (v) => v.status >= 0 && v.status <= 3;
 const isFailedStatus = (v) => v.status === 5 || v.status === 6;
 
-const TABS = ['Videos', 'Viewers', 'Shares', 'Settings', 'Activity', 'Analytics'];
+// Tab -> the capabilities that make it worth showing (any one is enough).
+// Purely presentational: the server-side guard on each route is the actual
+// access decision, so a hidden tab is a tidier UI, not a security boundary.
+const TAB_CAPS = {
+  Videos: [CAP.VIDEOS_READ, CAP.VIDEOS_MANAGE, CAP.VIDEOS_UPLOAD],
+  Viewers: [CAP.VIEWERS_READ, CAP.VIEWERS_MANAGE],
+  Shares: [CAP.SHARES_READ, CAP.SHARES_MANAGE],
+  Groups: [CAP.GROUPS_MANAGE],
+  Roles: [CAP.ROLES_MANAGE],
+  Settings: [CAP.SETTINGS_MANAGE],
+  Activity: [CAP.AUDIT_READ],
+  Analytics: [CAP.ANALYTICS_READ],
+};
+const TAB_ORDER = ['Videos', 'Viewers', 'Groups', 'Roles', 'Shares', 'Settings', 'Activity', 'Analytics'];
 
-export default function Admin({ user, mailOn, pushOn }) {
-  const [tab, setTab] = useState('Videos');
+export default function Admin({ user, mailOn, pushOn, owner, capabilities }) {
+  const caps = useMemo(() => new Set(capabilities || []), [capabilities]);
+  const can = useCallback((cap) => owner || caps.has(cap), [owner, caps]);
+  const TABS = useMemo(
+    () => TAB_ORDER.filter((name) => owner || TAB_CAPS[name].some((c) => caps.has(c))),
+    [owner, caps]
+  );
+  const [tab, setTab] = useState(TABS[0] || 'Videos');
   // The tabs below are pure React state, not routes — switching tabs fires
   // no navigation event, so the Query Monitor's per-view call log wouldn't
   // otherwise reset here. Without this, a tab that lazily fetches its own
@@ -89,7 +123,11 @@ export default function Admin({ user, mailOn, pushOn }) {
   const [shares, setShares] = useState([]);
   const [loadError, setLoadError] = useState('');
 
+  // Each loader is skipped when the caller lacks the capability to read it —
+  // otherwise a staff member with, say, only shares.read would greet every
+  // page load with a 403 banner for data they were never meant to see.
   const loadVideos = useCallback(async () => {
+    if (!can(CAP.VIDEOS_READ)) return;
     try {
       const data = await api('/api/admin/videos');
       setVideos(data.videos || []);
@@ -97,22 +135,25 @@ export default function Admin({ user, mailOn, pushOn }) {
     } catch (err) {
       setLoadError(err.message);
     }
-  }, []);
+  }, [can]);
   const loadCollections = useCallback(async () => {
+    if (!can(CAP.VIDEOS_READ)) return;
     try {
       setCollections((await api('/api/admin/collections')).collections || []);
     } catch {}
-  }, []);
+  }, [can]);
   const loadViewers = useCallback(async () => {
+    if (!can(CAP.VIEWERS_READ)) return;
     try {
       setViewers((await api('/api/admin/viewers')).viewers || []);
     } catch {}
-  }, []);
+  }, [can]);
   const loadShares = useCallback(async () => {
+    if (!can(CAP.SHARES_READ)) return;
     try {
       setShares((await api('/api/admin/shares')).shares || []);
     } catch {}
-  }, []);
+  }, [can]);
 
   useEffect(() => {
     loadVideos();
@@ -171,6 +212,10 @@ export default function Admin({ user, mailOn, pushOn }) {
         />
       ) : null}
       {tab === 'Viewers' ? <ViewersTab viewers={viewers} reload={loadViewers} /> : null}
+      {tab === 'Groups' ? (
+        <GroupsTab viewers={viewers} videos={videos} collections={collections} />
+      ) : null}
+      {tab === 'Roles' ? <RolesTab viewers={viewers} owner={owner} /> : null}
       {tab === 'Shares' ? <SharesTab shares={shares} reload={loadShares} mailOn={mailOn} /> : null}
       {tab === 'Settings' ? <SettingsTab pushOn={pushOn} /> : null}
       {tab === 'Activity' ? <ActivityTab /> : null}
@@ -203,6 +248,9 @@ function VideosTab({
   const [editing, setEditing] = useState(null); // { guid, title }
   const [shareFor, setShareFor] = useState(null); // guid
   const [privateListFor, setPrivateListFor] = useState(null); // guid
+  const [scheduleFor, setScheduleFor] = useState(null); // guid
+  const [scheduleDraft, setScheduleDraft] = useState({ from: '', until: '' });
+  const [scheduleError, setScheduleError] = useState('');
   const [copiedId, setCopiedId] = useState('');
   const [newCollection, setNewCollection] = useState('');
   const [collectionShareNotice, setCollectionShareNotice] = useState('');
@@ -329,6 +377,15 @@ function VideosTab({
     setCollectionShareNotice('');
   }
 
+  function openSchedule(guid, current) {
+    setScheduleError('');
+    setScheduleFor(scheduleFor === guid ? null : guid);
+    setScheduleDraft({
+      from: current?.from ? current.from.slice(0, 16) : '',
+      until: current?.until ? current.until.slice(0, 16) : '',
+    });
+  }
+
   function toggleAnalytics(guid) {
     setOpenAnalytics((prev) => {
       const next = new Set(prev);
@@ -336,6 +393,16 @@ function VideosTab({
       else next.add(guid);
       return next;
     });
+  }
+
+  async function saveSchedule(guid, from, until) {
+    try {
+      await api('/api/admin/schedule', { method: 'POST', body: { guid, from, until } });
+      setScheduleFor(null);
+      reloadVideos();
+    } catch (err) {
+      setScheduleError(err.message);
+    }
   }
 
   async function setVideoWatermark(guid, watermarkMode) {
@@ -691,6 +758,23 @@ function VideosTab({
             >
               Private list
             </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => openSchedule(v.guid, v.schedule)}
+              title="Hide this video until a date, after a date, or both"
+            >
+              Schedule
+              {windowState(v.schedule) === 'scheduled' ? (
+                <span className="badge badge-warn">Scheduled</span>
+              ) : null}
+              {windowState(v.schedule) === 'expired' ? (
+                <span className="badge badge-err">Expired</span>
+              ) : null}
+              {windowState(v.schedule) === 'live' ? (
+                <span className="badge badge-ok">Windowed</span>
+              ) : null}
+            </button>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => toggleAnalytics(v.guid)}>
               Analytics
             </button>
@@ -718,6 +802,60 @@ function VideosTab({
                 viewers={viewers}
                 onChanged={() => reloadShares()}
               />
+            ) : null}
+            {scheduleFor === v.guid ? (
+              <div className="card card-pad">
+                <h3 className="section-title">Publish window</h3>
+                <p className="muted">
+                  Leave both blank for always visible. Staff always see the video regardless, so
+                  you can preview what you scheduled. This hides a video from viewers — it is a
+                  publishing convenience, not an embargo.
+                </p>
+                <div className="field-row">
+                  <label className="field-block">
+                    Visible from
+                    <input
+                      type="datetime-local"
+                      className="input"
+                      value={scheduleDraft.from}
+                      onChange={(e) => setScheduleDraft({ ...scheduleDraft, from: e.target.value })}
+                    />
+                  </label>
+                  <label className="field-block">
+                    Hidden again from
+                    <input
+                      type="datetime-local"
+                      className="input"
+                      value={scheduleDraft.until}
+                      onChange={(e) => setScheduleDraft({ ...scheduleDraft, until: e.target.value })}
+                    />
+                  </label>
+                </div>
+                {scheduleError ? <p className="error-text">{scheduleError}</p> : null}
+                <div className="field-row">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => saveSchedule(v.guid, scheduleDraft.from, scheduleDraft.until)}
+                  >
+                    Save window
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => saveSchedule(v.guid, '', '')}
+                  >
+                    Clear
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setScheduleFor(null)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
             ) : null}
             {openAnalytics.has(v.guid) ? (
               <VideoAnalyticsPanel stats={shareRollup[v.guid]} />
@@ -824,6 +962,59 @@ function VideoAnalyticsPanel({ stats }) {
 // inline version since it drives a raw textarea, not an array.
 function AddViewersByTag({ viewers, onAdd }) {
   const [tagPick, setTagPick] = useState('');
+  const loadRequests = useCallback(async () => {
+    try {
+      setRequests((await api('/api/admin/access-requests')).requests || []);
+    } catch {
+      // A staff member without viewers.read simply has no queue to show.
+    }
+  }, []);
+
+  useEffect(() => {
+    loadRequests();
+    // The group picker is a convenience on approval; silently absent for
+    // someone without groups.manage, same idiom as the tab loaders above.
+    api('/api/admin/groups')
+      .then((d) => setGroups(d.groups || []))
+      .catch(() => {});
+  }, [loadRequests]);
+
+  async function approveRequest(target) {
+    const picked = [...(approveGroups[target] || [])];
+    try {
+      await api('/api/admin/access-requests', {
+        method: 'POST',
+        body: { email: target, groupIds: picked },
+      });
+      setStatus(`Approved ${target}.`);
+      loadRequests();
+      reload();
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
+  async function dismissRequest(target) {
+    if (!window.confirm(`Dismiss the access request from ${target}? They can ask again later.`)) {
+      return;
+    }
+    try {
+      await api('/api/admin/access-requests', { method: 'DELETE', body: { email: target } });
+      loadRequests();
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
+  function toggleApproveGroup(target, groupId) {
+    setApproveGroups((prev) => {
+      const next = new Set(prev[target] || []);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return { ...prev, [target]: next };
+    });
+  }
+
   const availableTags = useMemo(
     () => [...new Set((viewers || []).flatMap((v) => v.tags || []))].sort(),
     [viewers]
@@ -1226,6 +1417,9 @@ function BulkShareForm({ videoIds, mailOn, viewers, onCreated }) {
 // --------------------------------------------------------------- Viewers tab
 
 function ViewersTab({ viewers, reload }) {
+  const [requests, setRequests] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [approveGroups, setApproveGroups] = useState({}); // email -> Set(groupId)
   const [email, setEmail] = useState('');
   const [bulk, setBulk] = useState('');
   const [showBulk, setShowBulk] = useState(false);
@@ -1328,6 +1522,57 @@ function ViewersTab({ viewers, reload }) {
 
   return (
     <div className="tab-body">
+      {requests.length > 0 ? (
+        <div className="card card-pad">
+          <h2 className="section-title">
+            Pending access requests <span className="tab-badge">{requests.length}</span>
+          </h2>
+          <div className="admin-rows">
+            {requests.map((r) => (
+              <div key={r.email} className="admin-row">
+                <div className="row-main">
+                  <span className="row-title">{r.email}</span>
+                  <span className="row-meta muted">
+                    Asked {fmtWhen(r.at)}
+                    {r.note ? ` · “${r.note}”` : ''}
+                  </span>
+                  {groups.length > 0 ? (
+                    <div className="chips">
+                      {groups.map((g) => (
+                        <label key={g.id} className="field-row">
+                          <input
+                            type="checkbox"
+                            checked={(approveGroups[r.email] || new Set()).has(g.id)}
+                            onChange={() => toggleApproveGroup(r.email, g.id)}
+                          />
+                          <span>{g.name}</span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="row-meta">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => approveRequest(r.email)}
+                  >
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => dismissRequest(r.email)}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       <div className="card card-pad">
         <h2 className="section-title">Approved viewers</h2>
         <form className="inline-form" onSubmit={add}>
@@ -2328,6 +2573,673 @@ function AnalyticsTab({ shareRollup }) {
           </div>
         ))}
         {sharePerformance.length === 0 ? <p className="empty">No shares yet.</p> : null}
+      </div>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------- Roles tab
+
+// Checkbox grid over the capability catalog. `allowed` is the set the current
+// actor may hand out — anything outside it renders disabled, so the
+// no-escalation rule the API enforces is visible in the UI instead of only
+// showing up as a 403.
+function CapabilityPicker({ catalog, selected, onToggle, allowed }) {
+  const groups = useMemo(() => {
+    const out = new Map();
+    for (const item of catalog) {
+      if (!out.has(item.group)) out.set(item.group, []);
+      out.get(item.group).push(item);
+    }
+    return [...out.entries()];
+  }, [catalog]);
+
+  return (
+    <div className="field-block">
+      {groups.map(([groupName, items]) => (
+        <div key={groupName} className="field-block">
+          <span className="muted">{groupName}</span>
+          {items.map((item) => {
+            const permitted = allowed.has(item.cap);
+            return (
+              <label key={item.cap} className="field-row" title={permitted ? '' : 'Outside your own capabilities'}>
+                <input
+                  type="checkbox"
+                  checked={selected.has(item.cap)}
+                  disabled={!permitted}
+                  onChange={() => onToggle(item.cap)}
+                />
+                <span>{item.label}</span>
+                <code className="muted">{item.cap}</code>
+              </label>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RolesTab({ viewers, owner }) {
+  const [roles, setRoles] = useState([]);
+  const [assignments, setAssignments] = useState({});
+  const [catalog, setCatalog] = useState([]);
+  const [actorCaps, setActorCaps] = useState([]);
+  const [status, setStatus] = useState('');
+  const [newName, setNewName] = useState('');
+  const [newCaps, setNewCaps] = useState(new Set());
+  const [editing, setEditing] = useState(null);
+  const [assignEmail, setAssignEmail] = useState('');
+  const [assignRoles, setAssignRoles] = useState(new Set());
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await api('/api/admin/roles');
+      setRoles(data.roles || []);
+      setAssignments(data.assignments || {});
+      setCatalog(data.catalog || []);
+      setActorCaps(data.actor?.capabilities || []);
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const allowed = useMemo(() => new Set(actorCaps), [actorCaps]);
+  const roleById = useMemo(() => Object.fromEntries(roles.map((r) => [r.id, r])), [roles]);
+
+  function toggleIn(setter) {
+    return (value) =>
+      setter((prev) => {
+        const next = new Set(prev);
+        if (next.has(value)) next.delete(value);
+        else next.add(value);
+        return next;
+      });
+  }
+
+  async function create(e) {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    setBusy(true);
+    setStatus('');
+    try {
+      await api('/api/admin/roles', {
+        method: 'POST',
+        body: { name: newName, capabilities: [...newCaps] },
+      });
+      setNewName('');
+      setNewCaps(new Set());
+      load();
+    } catch (err) {
+      setStatus(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveEdit() {
+    if (!editing) return;
+    setBusy(true);
+    setStatus('');
+    try {
+      await api('/api/admin/roles', {
+        method: 'PUT',
+        body: { id: editing.id, name: editing.name, capabilities: [...editing.caps] },
+      });
+      setEditing(null);
+      load();
+    } catch (err) {
+      setStatus(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(role) {
+    const holders = Object.entries(assignments).filter(([, ids]) => ids.includes(role.id)).length;
+    const warning = holders
+      ? `Delete the role "${role.name}"? ${holders} ${holders === 1 ? 'person' : 'people'} will lose it.`
+      : `Delete the role "${role.name}"?`;
+    if (!window.confirm(warning)) return;
+    try {
+      await api(`/api/admin/roles?id=${encodeURIComponent(role.id)}`, { method: 'DELETE' });
+      load();
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
+  async function saveAssignment(e) {
+    e.preventDefault();
+    const email = assignEmail.trim();
+    if (!email) return;
+    setBusy(true);
+    setStatus('');
+    try {
+      await api('/api/admin/roles', {
+        method: 'PATCH',
+        body: { email, roleIds: [...assignRoles] },
+      });
+      setStatus(`Saved roles for ${email}.`);
+      setAssignEmail('');
+      setAssignRoles(new Set());
+      load();
+    } catch (err) {
+      setStatus(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Loading an existing assignment into the editor when an email is picked.
+  function pickAssignee(email) {
+    setAssignEmail(email);
+    setAssignRoles(new Set(assignments[email] || []));
+  }
+
+  return (
+    <div className="tab-body">
+      {status ? <p className="error-text">{status}</p> : null}
+
+      <div className="card card-pad notice">
+        <p>
+          Roles grant capabilities to people who are <strong>not</strong> in <code>ADMIN_EMAILS</code>.
+          Accounts in that env var are owners: they always hold every capability, cannot be demoted
+          from here, and changing that list still needs an env edit and a redeploy.
+          {owner ? null : ' You can only grant capabilities you hold yourself.'}
+        </p>
+      </div>
+
+      <div className="card card-pad">
+        <h2 className="section-title">Roles</h2>
+        {roles.length === 0 ? <p className="empty">No roles yet.</p> : null}
+        <div className="admin-rows">
+          {roles.map((role) => {
+            const holders = Object.entries(assignments)
+              .filter(([, ids]) => ids.includes(role.id))
+              .map(([email]) => email);
+            const isEditing = editing?.id === role.id;
+            return (
+              <div key={role.id} className="admin-row">
+                <div className="row-main">
+                  {isEditing ? (
+                    <>
+                      <input
+                        className="input"
+                        value={editing.name}
+                        onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                        aria-label="Role name"
+                      />
+                      <CapabilityPicker
+                        catalog={catalog}
+                        selected={editing.caps}
+                        allowed={allowed}
+                        onToggle={(cap) =>
+                          setEditing((prev) => {
+                            const next = new Set(prev.caps);
+                            if (next.has(cap)) next.delete(cap);
+                            else next.add(cap);
+                            return { ...prev, caps: next };
+                          })
+                        }
+                      />
+                      <div className="field-row">
+                        <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={saveEdit}>
+                          Save
+                        </button>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(null)}>
+                          Cancel
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <span className="row-title">{role.name}</span>
+                      <div className="chips">
+                        {role.capabilities.length === 0 ? (
+                          <span className="muted">no capabilities</span>
+                        ) : (
+                          role.capabilities.map((cap) => (
+                            <span key={cap} className="chip">
+                              {cap}
+                            </span>
+                          ))
+                        )}
+                      </div>
+                      <span className="row-meta muted">
+                        {holders.length ? `Held by ${holders.join(', ')}` : 'Held by nobody'}
+                      </span>
+                    </>
+                  )}
+                </div>
+                {isEditing ? null : (
+                  <div className="row-meta">
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => setEditing({ id: role.id, name: role.name, caps: new Set(role.capabilities) })}
+                    >
+                      Edit
+                    </button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => remove(role)}>
+                      Delete
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="card card-pad">
+        <h2 className="section-title">New role</h2>
+        <form className="stack-form" onSubmit={create}>
+          <input
+            className="input"
+            placeholder="Role name, e.g. Producer"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            aria-label="New role name"
+          />
+          <CapabilityPicker
+            catalog={catalog}
+            selected={newCaps}
+            allowed={allowed}
+            onToggle={toggleIn(setNewCaps)}
+          />
+          <button type="submit" className="btn btn-primary" disabled={busy || !newName.trim()}>
+            Create role
+          </button>
+        </form>
+      </div>
+
+      <div className="card card-pad">
+        <h2 className="section-title">Who holds what</h2>
+        <form className="stack-form" onSubmit={saveAssignment}>
+          <div className="field-row">
+            <select
+              className="select"
+              value={assignEmail}
+              onChange={(e) => pickAssignee(e.target.value)}
+              aria-label="Person"
+            >
+              <option value="">Pick an approved viewer…</option>
+              {viewers.map((v) => (
+                <option key={v.email} value={v.email}>
+                  {v.email}
+                </option>
+              ))}
+            </select>
+            <input
+              className="input"
+              placeholder="…or type any email"
+              value={assignEmail}
+              onChange={(e) => pickAssignee(e.target.value)}
+              aria-label="Email to assign roles to"
+            />
+          </div>
+          {roles.length === 0 ? (
+            <p className="muted">Create a role first.</p>
+          ) : (
+            <div className="field-block">
+              {roles.map((role) => (
+                <label key={role.id} className="field-row">
+                  <input
+                    type="checkbox"
+                    checked={assignRoles.has(role.id)}
+                    onChange={() => toggleIn(setAssignRoles)(role.id)}
+                  />
+                  <span>{role.name}</span>
+                  <code className="muted">{role.capabilities.join(', ') || 'no capabilities'}</code>
+                </label>
+              ))}
+            </div>
+          )}
+          <button type="submit" className="btn btn-primary" disabled={busy || !assignEmail.trim()}>
+            Save roles for this person
+          </button>
+        </form>
+
+        <div className="admin-rows">
+          {Object.keys(assignments).length === 0 ? (
+            <p className="empty">Nobody holds a role yet.</p>
+          ) : (
+            Object.entries(assignments)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([email, ids]) => (
+                <div key={email} className="admin-row">
+                  <div className="row-main">
+                    <span className="row-title">{email}</span>
+                    <div className="chips">
+                      {ids.map((id) => (
+                        <span key={id} className="chip">
+                          {roleById[id]?.name || id}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="row-meta">
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => pickAssignee(email)}>
+                      Edit
+                    </button>
+                  </div>
+                </div>
+              ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- Groups tab
+
+function GroupsTab({ viewers, videos, collections }) {
+  const [groups, setGroups] = useState([]);
+  const [gating, setGating] = useState({ enabled: false, defaultAccess: 'open' });
+  const [status, setStatus] = useState('');
+  const [newName, setNewName] = useState('');
+  const [editing, setEditing] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await api('/api/admin/groups');
+      setGroups(data.groups || []);
+      setGating(data.gating || { enabled: false, defaultAccess: 'open' });
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }, []);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function create(e) {
+    e.preventDefault();
+    if (!newName.trim()) return;
+    setBusy(true);
+    setStatus('');
+    try {
+      await api('/api/admin/groups', { method: 'POST', body: { name: newName } });
+      setNewName('');
+      load();
+    } catch (err) {
+      setStatus(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveEdit() {
+    if (!editing) return;
+    setBusy(true);
+    setStatus('');
+    try {
+      await api('/api/admin/groups', {
+        method: 'PUT',
+        body: {
+          id: editing.id,
+          name: editing.name,
+          collectionIds: [...editing.collectionIds],
+          videoIds: [...editing.videoIds],
+        },
+      });
+      await api('/api/admin/groups', {
+        method: 'PATCH',
+        body: { action: 'set-members', groupId: editing.id, emails: [...editing.members] },
+      });
+      setEditing(null);
+      load();
+    } catch (err) {
+      setStatus(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(group) {
+    if (!window.confirm(`Delete the group "${group.name}"? Its ${group.members.length} members keep their access.`)) {
+      return;
+    }
+    try {
+      await api(`/api/admin/groups?id=${encodeURIComponent(group.id)}`, { method: 'DELETE' });
+      load();
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
+  async function setDefaultAccess(value) {
+    setStatus('');
+    try {
+      const data = await api('/api/admin/groups', {
+        method: 'PATCH',
+        body: { action: 'set-default-access', defaultAccess: value },
+      });
+      setGating((prev) => ({ ...prev, defaultAccess: data.defaultAccess }));
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
+  function toggleInEditing(field, value) {
+    setEditing((prev) => {
+      const next = new Set(prev[field]);
+      if (next.has(value)) next.delete(value);
+      else next.add(value);
+      return { ...prev, [field]: next };
+    });
+  }
+
+  return (
+    <div className="tab-body">
+      {status ? <p className="error-text">{status}</p> : null}
+
+      <div className="card card-pad notice">
+        <h2 className="section-title">Content gating</h2>
+        {gating.enabled ? (
+          <>
+            <p>
+              <span className="badge badge-ok">On</span> Each group&apos;s scope is enforced.
+              A viewer in one or more groups sees only the union of those groups&apos; collections
+              and videos — on the homepage, in collection filters, and on direct
+              <code> /watch/… </code> links alike. A group scoped to nothing grants nothing.
+            </p>
+            <div className="field-row">
+              <span>Viewers in no group see:</span>
+              <label className="field-row">
+                <input
+                  type="radio"
+                  name="groupDefaultAccess"
+                  checked={gating.defaultAccess !== 'closed'}
+                  onChange={() => setDefaultAccess('open')}
+                />
+                <span>the whole library</span>
+              </label>
+              <label className="field-row">
+                <input
+                  type="radio"
+                  name="groupDefaultAccess"
+                  checked={gating.defaultAccess === 'closed'}
+                  onChange={() => setDefaultAccess('closed')}
+                />
+                <span>nothing</span>
+              </label>
+            </div>
+          </>
+        ) : (
+          <p>
+            <span className="badge badge-warn">Off</span> Groups are membership bookkeeping only —
+            scopes are recorded but change nobody&apos;s library. Set{' '}
+            <code>GROUP_CONTENT_GATING=1</code> and redeploy to enforce them.
+          </p>
+        )}
+        <p className="muted">
+          Share links are never group-gated: a share is an explicit per-recipient grant for one
+          video, and its recipients need not be approved viewers at all.
+        </p>
+      </div>
+
+      <div className="card card-pad">
+        <h2 className="section-title">Groups</h2>
+        {groups.length === 0 ? <p className="empty">No groups yet.</p> : null}
+        <div className="admin-rows">
+          {groups.map((group) => {
+            const isEditing = editing?.id === group.id;
+            if (!isEditing) {
+              return (
+                <div key={group.id} className="admin-row">
+                  <div className="row-main">
+                    <span className="row-title">{group.name}</span>
+                    <span className="row-meta muted">
+                      {group.members.length} {group.members.length === 1 ? 'member' : 'members'} ·{' '}
+                      {group.collectionIds.length} collections · {group.videoIds.length} videos
+                    </span>
+                    <div className="chips">
+                      {group.members.slice(0, 8).map((email) => (
+                        <span key={email} className="chip">
+                          {email}
+                        </span>
+                      ))}
+                      {group.members.length > 8 ? (
+                        <span className="muted">+{group.members.length - 8} more</span>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="row-meta">
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      onClick={() =>
+                        setEditing({
+                          id: group.id,
+                          name: group.name,
+                          members: new Set(group.members),
+                          collectionIds: new Set(group.collectionIds),
+                          videoIds: new Set(group.videoIds),
+                        })
+                      }
+                    >
+                      Edit
+                    </button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => remove(group)}>
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div key={group.id} className="admin-row">
+                <div className="row-main">
+                  <input
+                    className="input"
+                    value={editing.name}
+                    onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                    aria-label="Group name"
+                  />
+
+                  <div className="field-block">
+                    <span className="muted">Members</span>
+                    {viewers.length === 0 ? (
+                      <p className="muted">No approved viewers yet.</p>
+                    ) : (
+                      viewers.map((v) => (
+                        <label key={v.email} className="field-row">
+                          <input
+                            type="checkbox"
+                            checked={editing.members.has(v.email)}
+                            onChange={() => toggleInEditing('members', v.email)}
+                          />
+                          <span>{v.email}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="field-block">
+                    <span className="muted">Collections this group can see</span>
+                    {collections.length === 0 ? (
+                      <p className="muted">No collections.</p>
+                    ) : (
+                      collections.map((c) => (
+                        <label key={c.guid} className="field-row">
+                          <input
+                            type="checkbox"
+                            checked={editing.collectionIds.has(c.guid)}
+                            onChange={() => toggleInEditing('collectionIds', c.guid)}
+                          />
+                          <span>
+                            {c.name} <span className="muted">({c.videoCount})</span>
+                          </span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+
+                  <div className="field-block">
+                    <span className="muted">Individual videos this group can see</span>
+                    {videos.length === 0 ? (
+                      <p className="muted">No videos.</p>
+                    ) : (
+                      videos.map((v) => (
+                        <label key={v.guid} className="field-row">
+                          <input
+                            type="checkbox"
+                            checked={editing.videoIds.has(v.guid)}
+                            onChange={() => toggleInEditing('videoIds', v.guid)}
+                          />
+                          <span>{v.title || 'Untitled'}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+
+                  {gating.enabled &&
+                  editing.collectionIds.size === 0 &&
+                  editing.videoIds.size === 0 &&
+                  editing.members.size > 0 ? (
+                    <p className="error-text">
+                      This group grants no content. With gating on, its members will see an empty
+                      library.
+                    </p>
+                  ) : null}
+
+                  <div className="field-row">
+                    <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={saveEdit}>
+                      Save
+                    </button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(null)}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="card card-pad">
+        <h2 className="section-title">New group</h2>
+        <form className="inline-form" onSubmit={create}>
+          <input
+            className="input"
+            placeholder="Group name, e.g. Deck crew"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            aria-label="New group name"
+          />
+          <button type="submit" className="btn btn-primary" disabled={busy || !newName.trim()}>
+            Create group
+          </button>
+        </form>
       </div>
     </div>
   );

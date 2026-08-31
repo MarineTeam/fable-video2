@@ -3,8 +3,9 @@ import Link from 'next/link';
 import AppShell from '../components/AppShell';
 import { PlayIcon, SearchIcon, ChevronLeftIcon, ChevronRightIcon } from '../components/icons';
 import { auth0 } from '../lib/auth0';
-import { isAdmin, normalizeEmail } from '../lib/auth';
+import { normalizeEmail, trustedEmail } from '../lib/auth';
 import { redis, k } from '../lib/redis';
+import { viewerAccessFor } from '../lib/guard';
 import { isGeoAllowed } from '../lib/geo';
 import { withMonitorPage } from '../lib/monitor';
 
@@ -13,19 +14,27 @@ async function gssp({ req, res }) {
   if (!session) {
     return { redirect: { destination: '/auth/login?returnTo=/', permanent: false } };
   }
-  const email = normalizeEmail(session.user.email);
-  const admin = isAdmin(email);
+  // Signed in but unverified: render a notice rather than redirecting to
+  // login, which would bounce straight back here and loop.
+  const email = trustedEmail(session.user);
+  if (!email) {
+    const claimed = normalizeEmail(session.user.email);
+    return {
+      props: {
+        user: { email: claimed, name: session.user.name || claimed },
+        isAdmin: false,
+        approved: false,
+        unverified: true,
+      },
+    };
+  }
+  const { approved, owner, staff } = await viewerAccessFor(email);
+  // "admin" here means "show the Admin link" — an owner or anyone holding a
+  // capability, since both have somewhere to go in /admin.
+  const admin = owner || staff;
   const user = { email, name: session.user.name || email };
   if (!(await isGeoAllowed(req, { admin, email }))) {
     return { props: { user, isAdmin: admin, approved: false, geoBlocked: true } };
-  }
-  let approved = admin;
-  if (!approved) {
-    try {
-      approved = (await redis().sismember(k('viewers'), email)) === 1;
-    } catch {
-      approved = false;
-    }
   }
   if (approved) {
     redis()
@@ -53,7 +62,7 @@ function fmtDuration(seconds) {
     : `${m}:${String(sec).padStart(2, '0')}`;
 }
 
-export default function Home({ user, isAdmin: admin, approved, geoBlocked }) {
+export default function Home({ user, isAdmin: admin, approved, geoBlocked, unverified }) {
   const [videos, setVideos] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -65,6 +74,30 @@ export default function Home({ user, isAdmin: admin, approved, geoBlocked }) {
   const [collections, setCollections] = useState([]);
   const [activeCollection, setActiveCollection] = useState('');
   const [progress, setProgress] = useState([]);
+  // Access-request form state. Declared with the other hooks (before any early
+  // return) so the not-approved branch below can use it.
+  const [requestNote, setRequestNote] = useState('');
+  const [requestState, setRequestState] = useState('idle');
+  const [requestError, setRequestError] = useState('');
+
+  async function requestAccess(e) {
+    e.preventDefault();
+    setRequestState('sending');
+    setRequestError('');
+    try {
+      const res = await fetch('/api/request-access', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ note: requestNote }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not send the request');
+      setRequestState(data.duplicate ? 'duplicate' : 'sent');
+    } catch (err) {
+      setRequestError(err.message);
+      setRequestState('idle');
+    }
+  }
 
   // Debounced search.
   useEffect(() => {
@@ -112,6 +145,20 @@ export default function Home({ user, isAdmin: admin, approved, geoBlocked }) {
       .catch(() => {});
   }, [approved]);
 
+  if (unverified) {
+    return (
+      <AppShell user={user} isAdmin={false} approved={false}>
+        <div className="card card-pad notice">
+          <h1>Verify your email</h1>
+          <p>
+            You&apos;re signed in as <strong>{user.email}</strong>, but that address hasn&apos;t been
+            verified yet. Check your inbox for the verification link, then reload this page.
+          </p>
+        </div>
+      </AppShell>
+    );
+  }
+
   if (geoBlocked) {
     return (
       <AppShell user={user} isAdmin={admin} approved={false}>
@@ -133,9 +180,35 @@ export default function Home({ user, isAdmin: admin, approved, geoBlocked }) {
           <h1>Not approved yet</h1>
           <p>
             You&apos;re signed in as <strong>{user.email}</strong>, but this account isn&apos;t on
-            the approved viewer list. If you were expecting access, contact the person who invited
-            you.
+            the approved viewer list.
           </p>
+          {requestState === 'sent' || requestState === 'duplicate' ? (
+            <p>
+              {requestState === 'duplicate'
+                ? 'Your request is already waiting to be reviewed.'
+                : 'Request sent — an administrator will review it.'}
+            </p>
+          ) : (
+            <form className="stack-form" onSubmit={requestAccess}>
+              <p>Ask for access and someone will review it.</p>
+              <input
+                className="input"
+                placeholder="Optional: who you are, or why you need access"
+                value={requestNote}
+                onChange={(e) => setRequestNote(e.target.value)}
+                maxLength={200}
+                aria-label="Note for the administrator"
+              />
+              {requestError ? <p className="error-text">{requestError}</p> : null}
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={requestState === 'sending'}
+              >
+                {requestState === 'sending' ? 'Sending…' : 'Request access'}
+              </button>
+            </form>
+          )}
         </div>
       </AppShell>
     );

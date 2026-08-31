@@ -1,5 +1,6 @@
 import { withMonitorApi } from "../../../lib/monitor";
-import { requireAdmin } from '../../../lib/guard';
+import { requireCapability } from '../../../lib/guard';
+import { CAP } from '../../../lib/capabilities';
 import { listVideos, getStatistics } from '../../../lib/bunny';
 
 // Views / watch time / most-watched from bunny.net video stats + the
@@ -7,7 +8,7 @@ import { listVideos, getStatistics } from '../../../lib/bunny';
 // renders a dashboard.
 async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
-  const admin = await requireAdmin(req, res);
+  const admin = await requireCapability(req, res, CAP.ANALYTICS_READ);
   if (!admin) return;
 
   const now = new Date();

@@ -1,6 +1,6 @@
 import { withMonitorApi } from "../../lib/monitor";
 import { auth0 } from '../../lib/auth0';
-import { normalizeEmail } from '../../lib/auth';
+import { trustedEmail } from '../../lib/auth';
 import { allowRequest } from '../../lib/ratelimit';
 import { redis, k } from '../../lib/redis';
 import { isShareActive } from '../../lib/share';
@@ -11,7 +11,11 @@ async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   const session = await auth0.getSession(req, res);
   if (!session) return res.status(401).json({ error: 'Not signed in' });
-  const email = normalizeEmail(session.user.email);
+  // This route does its own session check rather than going through a guard,
+  // so it needs the trusted-email treatment explicitly — an unverified session
+  // is not signed in for access purposes.
+  const email = trustedEmail(session.user);
+  if (!email) return res.status(401).json({ error: 'Not signed in' });
   if (!(await allowRequest('share-event', email, 60, 60))) {
     return res.status(429).json({ error: 'Too many requests' });
   }

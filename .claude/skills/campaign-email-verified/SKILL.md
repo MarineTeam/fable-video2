@@ -5,8 +5,28 @@ description: The executable, decision-gated campaign to close the project's hard
 
 # Campaign: enforce `email_verified`
 
-**Status: OPEN — not started as of 2026-07-18.** This document is the plan,
-not a record of work done. Nothing below is implemented.
+**Status: CODE LANDED 2026-08-31, ENFORCEMENT NOT YET ON.** Phases 0, 2 and 3
+are done; **Phases 1 and 4 are outstanding and need a live deployment.**
+
+What exists now: `trustedEmail` in `lib/auth.js` (denies unless
+`email_verified` is boolean `true`), wired at all 8 trust sites, with 10 unit
+tests. Gated behind `REQUIRE_EMAIL_VERIFIED=1` and **off by default**, because
+Phase 1 could not be run from a sandbox and enabling it against a tenant that
+omits the claim locks out everyone including owners.
+
+Two corrections to this document, found by actually re-running Phase 0:
+its trust-site list of 5 files is stale — there are **8**
+(`pages/b/[id].js`, `pages/activity.js` and `pages/api/share-event.js` were
+added after it was written) — and its "30 existing tests" baseline is now 247.
+Phase 2's share-recipient sub-gate was decided by the owner on 2026-08-31:
+**enforce everywhere**, share and bundle pages included.
+
+Still to do, in order: **Phase 1** — sign in on a preview and confirm
+`email_verified` is a real boolean (`/auth/profile`). **Phase 4** — set
+`REQUIRE_EMAIL_VERIFIED=1` on that preview, confirm a verified user is
+unaffected and an unverified one gets the "verify your email" notice (not a
+500, not a redirect loop), run the smoke-probe, then promote. Only after that
+is this campaign closable.
 
 **The hole (verify before believing me):** every access decision in this app
 compares the session's email claim against admin-managed lists, and none of

@@ -1,5 +1,6 @@
 import { withMonitorApi } from "../../../lib/monitor";
-import { requireAdmin } from '../../../lib/guard';
+import { requireCapability } from '../../../lib/guard';
+import { CAP } from '../../../lib/capabilities';
 import { allowRequest } from '../../../lib/ratelimit';
 import { normalizeEmail, isValidEmail } from '../../../lib/auth';
 import { getVideo } from '../../../lib/bunny';
@@ -11,7 +12,7 @@ const MAX_EMAILS = 50;
 
 async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  const admin = await requireAdmin(req, res);
+  const admin = await requireCapability(req, res, CAP.SHARES_MANAGE);
   if (!admin) return;
   if (!(await allowRequest('share', admin, 10, 60))) {
     return res.status(429).json({ error: 'Too many requests' });

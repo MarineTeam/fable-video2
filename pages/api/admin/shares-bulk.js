@@ -1,5 +1,6 @@
 import { withMonitorApi } from "../../../lib/monitor";
-import { requireAdmin } from '../../../lib/guard';
+import { requireCapability } from '../../../lib/guard';
+import { CAP } from '../../../lib/capabilities';
 import { allowRequest } from '../../../lib/ratelimit';
 import { logAction } from '../../../lib/audit';
 import { baseUrl, resendShareEmails, revokeShares, unrevokeShares, purgeShares } from '../../../lib/share';
@@ -15,7 +16,7 @@ const MAX_IDS = 200;
 // for why that's the difference between O(1) and O(selection size) commands.
 async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  const admin = await requireAdmin(req, res);
+  const admin = await requireCapability(req, res, CAP.SHARES_MANAGE);
   if (!admin) return;
   if (!(await allowRequest('shares-bulk', admin, 10, 60))) {
     return res.status(429).json({ error: 'Too many requests' });
