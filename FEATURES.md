@@ -35,6 +35,10 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
   variables, but a name is rendered text, so a client fetch would flash the default first or disagree with the
   server-rendered HTML. Blank resets to the default; an unreadable value falls back to it rather than rendering an
   empty header. Capped at 40 characters, with a home-screen short name derived at a word boundary.
+  The service worker serves the manifest **network-first** (icons stay cache-first — they never change) and the
+  response is marked `must-revalidate`, so neither the SW cache nor the HTTP cache pins an installed app to the
+  name it had at install. When the new name actually appears on a home screen is then the OS's call: promptly on
+  Chrome desktop, up to a day or so for an Android WebAPK, and not until re-adding on iOS.
 - **Admin-adjustable color palette** _(admin)_ — 7 presets plus custom hex colors, applied to **all** visitors; cached client-side with a no-flash pre-paint script so returning visitors never see a color flicker.
 - **Video thumbnails** — the homepage upgrades to a responsive **thumbnail grid** (16:9 cards with a play overlay) when thumbnails are configured, and falls back to a clean title list otherwise. The admin library shows thumbnails too. Thumbnail URLs are **CDN token-signed** so they work with "Block Direct URL File Access" enabled.
 - **Search** — viewers can search the whole library by title (debounced).

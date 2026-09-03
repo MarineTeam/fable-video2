@@ -2267,8 +2267,10 @@ function SettingsTab({ pushOn }) {
         </form>
         <p className="muted">
           Leave it empty to go back to &ldquo;{DEFAULT_SITE_NAME}&rdquo;. Applies to every visitor,
-          no redeploy needed. An already-installed app keeps its old name until its cached manifest
-          refreshes.
+          no redeploy needed. Installed apps re-fetch the manifest, so they pick up a rename too —
+          though when the new name appears on a home screen is up to the OS (immediately on Chrome
+          desktop; Android can lag a day or so; iOS keeps the install-time name until the app is
+          re-added).
         </p>
       </div>
 

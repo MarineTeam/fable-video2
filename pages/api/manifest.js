@@ -16,9 +16,11 @@ async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
   const siteName = await getSiteName();
   res.setHeader('content-type', 'application/manifest+json; charset=utf-8');
-  // Short max-age: a rename should reach new installs quickly, but the file is
-  // fetched rarely enough that this costs nothing.
-  res.setHeader('cache-control', 'public, max-age=300');
+  // Always revalidate. This response is tiny and fetched rarely, and the site
+  // name behind it can change at any moment with no redeploy — an HTTP cache
+  // holding it for even a few minutes is the second way a rename fails to reach
+  // an installed app (the first was the service worker, now network-first).
+  res.setHeader('cache-control', 'public, max-age=0, must-revalidate');
   res.status(200).send(
     JSON.stringify(
       {
