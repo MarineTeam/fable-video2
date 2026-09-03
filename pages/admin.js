@@ -19,8 +19,10 @@ import { CAP } from '../lib/capabilities';
 import { PRESETS, COLOR_KEYS, applyTheme, validateTheme, THEME_STORAGE_KEY } from '../lib/theme';
 import { rollupSharesByVideo } from '../lib/videoAnalytics';
 import { windowState } from '../lib/schedule';
+import { DEFAULT_SITE_NAME, MAX_SITE_NAME_LENGTH } from '../lib/siteName';
 import { isGeoAllowed } from '../lib/geo';
 import { withMonitorPage } from '../lib/monitor';
+import { withSiteName } from '../lib/siteNameStore';
 import { resetMonitorCalls } from '../lib/monitorClient';
 
 // Server-side gate: non-admins are redirected before any admin UI is sent.
@@ -57,7 +59,7 @@ async function gssp({ req, res }) {
   };
 }
 
-export const getServerSideProps = withMonitorPage(gssp);
+export const getServerSideProps = withMonitorPage(withSiteName(gssp));
 
 async function api(path, { method = 'GET', body } = {}) {
   const res = await fetch(path, {
@@ -101,7 +103,7 @@ const TAB_CAPS = {
 };
 const TAB_ORDER = ['Videos', 'Viewers', 'Groups', 'Roles', 'Shares', 'Settings', 'Activity', 'Analytics'];
 
-export default function Admin({ user, mailOn, pushOn, owner, capabilities }) {
+export default function Admin({ user, mailOn, pushOn, owner, capabilities, siteName }) {
   const caps = useMemo(() => new Set(capabilities || []), [capabilities]);
   const can = useCallback((cap) => owner || caps.has(cap), [owner, caps]);
   const TABS = useMemo(
@@ -174,7 +176,7 @@ export default function Admin({ user, mailOn, pushOn, owner, capabilities }) {
   const shareRollup = useMemo(() => rollupSharesByVideo(shares), [shares]);
 
   return (
-    <AppShell user={user} isAdmin approved wide>
+    <AppShell siteName={siteName} user={user} isAdmin approved wide>
       <h1>Admin</h1>
       {loadError ? <p className="error-text">{loadError}</p> : null}
       <div className="tabs" role="tablist">
@@ -2073,6 +2075,8 @@ function SharesTab({ shares, reload, mailOn }) {
 // -------------------------------------------------------------- Settings tab
 
 function SettingsTab({ pushOn }) {
+  const [siteName, setSiteName] = useState('');
+  const [siteNameStatus, setSiteNameStatus] = useState('');
   const [homeCount, setHomeCount] = useState('');
   const [countStatus, setCountStatus] = useState('');
   const [theme, setTheme] = useState(null);
@@ -2096,6 +2100,7 @@ function SettingsTab({ pushOn }) {
   useEffect(() => {
     api('/api/admin/settings')
       .then((d) => {
+        setSiteName(d.siteName || '');
         setHomeCount(String(d.homeCount));
         setWmDefault(Boolean(d.watermarkDefault));
         setWmExempt(d.watermarkExempt || []);
@@ -2117,6 +2122,20 @@ function SettingsTab({ pushOn }) {
       })
       .catch(() => {});
   }, []);
+
+  async function saveSiteName(e) {
+    e.preventDefault();
+    setSiteNameStatus('');
+    try {
+      const data = await api('/api/admin/settings', { method: 'POST', body: { siteName } });
+      setSiteName(data.siteName);
+      // The name is server-rendered into the header and tab title, so the page
+      // has to reload to show it — saying so beats looking broken.
+      setSiteNameStatus('Saved — reload to see it in the header.');
+    } catch (err) {
+      setSiteNameStatus(err.message);
+    }
+  }
 
   async function saveCount(e) {
     e.preventDefault();
@@ -2227,6 +2246,32 @@ function SettingsTab({ pushOn }) {
 
   return (
     <div className="tab-body">
+      <div className="card card-pad">
+        <h2 className="section-title">Site name</h2>
+        <form className="inline-form" onSubmit={saveSiteName}>
+          <label className="field-inline">
+            Shown in the header, the browser tab and the installed app
+            <input
+              className="input"
+              type="text"
+              maxLength={MAX_SITE_NAME_LENGTH}
+              placeholder={DEFAULT_SITE_NAME}
+              value={siteName}
+              onChange={(e) => setSiteName(e.target.value)}
+            />
+          </label>
+          <button type="submit" className="btn btn-primary btn-sm">
+            Save
+          </button>
+          {siteNameStatus ? <span className="muted">{siteNameStatus}</span> : null}
+        </form>
+        <p className="muted">
+          Leave it empty to go back to &ldquo;{DEFAULT_SITE_NAME}&rdquo;. Applies to every visitor,
+          no redeploy needed. An already-installed app keeps its old name until its cached manifest
+          refreshes.
+        </p>
+      </div>
+
       <div className="card card-pad">
         <h2 className="section-title">Homepage</h2>
         <form className="inline-form" onSubmit={saveCount}>

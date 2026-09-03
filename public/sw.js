@@ -46,7 +46,7 @@ self.addEventListener('push', (event) => {
     data = {};
   }
   event.waitUntil(
-    self.registration.showNotification(data.title || 'Marine Video Portal', {
+    self.registration.showNotification(data.title || 'New notification', {
       body: data.body || '',
       icon: '/icon-192.png',
       badge: '/icon-192.png',

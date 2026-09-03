@@ -5,6 +5,7 @@ import { baseUrl } from '../../lib/share';
 import { loadBundle, liveBundleItems } from '../../lib/bundle';
 import { isGeoAllowed } from '../../lib/geo';
 import { withMonitorPage } from '../../lib/monitor';
+import { withSiteName } from '../../lib/siteNameStore';
 
 // Consolidated listing for a recipient with multiple active shares. Gated
 // exactly like an individual /s/[id] link: sign in as the bundle's email and
@@ -51,12 +52,12 @@ async function gssp({ req, res, params }) {
   return { props: { state: 'ok', user, items } };
 }
 
-export const getServerSideProps = withMonitorPage(gssp);
+export const getServerSideProps = withMonitorPage(withSiteName(gssp));
 
-export default function Bundle({ state, user, items }) {
+export default function Bundle({ state, user, items, siteName }) {
   if (state === 'gone') {
     return (
-      <ShareShell user={user}>
+      <ShareShell siteName={siteName} user={user}>
         <div className="card card-pad notice">
           <h1>Link unavailable</h1>
           <p>This share link has expired or doesn&apos;t exist.</p>
@@ -66,7 +67,7 @@ export default function Bundle({ state, user, items }) {
   }
   if (state === 'unverified') {
     return (
-      <ShareShell user={user}>
+      <ShareShell siteName={siteName} user={user}>
         <div className="card card-pad notice">
           <h1>Verify your email</h1>
           <p>
@@ -79,7 +80,7 @@ export default function Bundle({ state, user, items }) {
   }
   if (state === 'mismatch') {
     return (
-      <ShareShell user={user}>
+      <ShareShell siteName={siteName} user={user}>
         <div className="card card-pad notice">
           <h1>Wrong account</h1>
           <p>
@@ -92,7 +93,7 @@ export default function Bundle({ state, user, items }) {
   }
   if (state === 'blocked') {
     return (
-      <ShareShell user={user}>
+      <ShareShell siteName={siteName} user={user}>
         <div className="card card-pad notice">
           <h1>Not available in your region</h1>
           <p>This link isn&apos;t accessible from your current location.</p>
@@ -101,7 +102,7 @@ export default function Bundle({ state, user, items }) {
     );
   }
   return (
-    <ShareShell user={user}>
+    <ShareShell siteName={siteName} user={user}>
       <h1 className="watch-title">Shared with you</h1>
       <ul className="bundle-list">
         {items.map((item) => (

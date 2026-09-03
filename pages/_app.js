@@ -3,9 +3,13 @@ import Head from 'next/head';
 import IdleTimeout from '../components/IdleTimeout';
 import QueryMonitor from '../components/QueryMonitor';
 import { applyTheme, validateTheme, THEME_STORAGE_KEY } from '../lib/theme';
+import { siteNameOrDefault } from '../lib/siteName';
 import '../styles/globals.css';
 
 export default function App({ Component, pageProps }) {
+  // Server-resolved and passed through page props, so the tab title is
+  // correct in the first HTML response rather than corrected after paint.
+  const siteName = siteNameOrDefault(pageProps.siteName);
   useEffect(() => {
     // Refresh the admin-set palette and cache it for the pre-paint script.
     fetch('/api/theme')
@@ -30,7 +34,7 @@ export default function App({ Component, pageProps }) {
     <>
       <Head>
         <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-        <title>Marine Video Portal</title>
+        <title>{siteName}</title>
       </Head>
       {pageProps.user ? <IdleTimeout /> : null}
       <Component {...pageProps} />

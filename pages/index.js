@@ -8,6 +8,7 @@ import { redis, k } from '../lib/redis';
 import { viewerAccessFor } from '../lib/guard';
 import { isGeoAllowed } from '../lib/geo';
 import { withMonitorPage } from '../lib/monitor';
+import { withSiteName } from '../lib/siteNameStore';
 
 async function gssp({ req, res }) {
   const session = await auth0.getSession(req, res);
@@ -50,7 +51,7 @@ async function gssp({ req, res }) {
   };
 }
 
-export const getServerSideProps = withMonitorPage(gssp);
+export const getServerSideProps = withMonitorPage(withSiteName(gssp));
 
 function fmtDuration(seconds) {
   const s = Math.max(0, Math.floor(seconds || 0));
@@ -62,7 +63,7 @@ function fmtDuration(seconds) {
     : `${m}:${String(sec).padStart(2, '0')}`;
 }
 
-export default function Home({ user, isAdmin: admin, approved, geoBlocked, unverified }) {
+export default function Home({ user, isAdmin: admin, approved, geoBlocked, unverified, siteName }) {
   const [videos, setVideos] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -147,7 +148,7 @@ export default function Home({ user, isAdmin: admin, approved, geoBlocked, unver
 
   if (unverified) {
     return (
-      <AppShell user={user} isAdmin={false} approved={false}>
+      <AppShell siteName={siteName} user={user} isAdmin={false} approved={false}>
         <div className="card card-pad notice">
           <h1>Verify your email</h1>
           <p>
@@ -161,7 +162,7 @@ export default function Home({ user, isAdmin: admin, approved, geoBlocked, unver
 
   if (geoBlocked) {
     return (
-      <AppShell user={user} isAdmin={admin} approved={false}>
+      <AppShell siteName={siteName} user={user} isAdmin={admin} approved={false}>
         <div className="card card-pad notice">
           <h1>Not available in your region</h1>
           <p>
@@ -175,7 +176,7 @@ export default function Home({ user, isAdmin: admin, approved, geoBlocked, unver
 
   if (!approved) {
     return (
-      <AppShell user={user} isAdmin={admin} approved={false}>
+      <AppShell siteName={siteName} user={user} isAdmin={admin} approved={false}>
         <div className="card card-pad notice">
           <h1>Not approved yet</h1>
           <p>
@@ -221,7 +222,7 @@ export default function Home({ user, isAdmin: admin, approved, geoBlocked, unver
   const hasThumbs = videos.some((v) => v.thumbnail);
 
   return (
-    <AppShell user={user} isAdmin={admin} approved>
+    <AppShell siteName={siteName} user={user} isAdmin={admin} approved>
       {continueWatching.length > 0 && !query && !activeCollection && page === 1 ? (
         <section className="cw-section">
           <h2 className="section-title">Continue watching</h2>

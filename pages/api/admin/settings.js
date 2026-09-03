@@ -3,6 +3,7 @@ import { requireCapability } from '../../../lib/guard';
 import { CAP } from '../../../lib/capabilities';
 import { redis, k } from '../../../lib/redis';
 import { logAction } from '../../../lib/audit';
+import { getSiteName, setSiteName } from '../../../lib/siteNameStore';
 import { normalizeEmail, isValidEmail } from '../../../lib/auth';
 import {
   getGlobalDefault,
@@ -32,13 +33,16 @@ async function handler(req, res) {
       const raw = await r.get(k('settings:homeCount'));
       homeCount = Math.min(Math.max(parseInt(raw, 10) || DEFAULT_COUNT, 1), 200);
     } catch {}
-    const [watermarkDefault, watermarkExempt, geoEnforcement, adminGeoEnforcement] = await Promise.all([
-      getGlobalDefault(),
-      listExempt(),
-      geoEnforcementOn(),
-      adminGeoEnforcementOn(),
-    ]);
+    const [watermarkDefault, watermarkExempt, geoEnforcement, adminGeoEnforcement, siteName] =
+      await Promise.all([
+        getGlobalDefault(),
+        listExempt(),
+        geoEnforcementOn(),
+        adminGeoEnforcementOn(),
+        getSiteName(),
+      ]);
     return res.json({
+      siteName,
       homeCount,
       watermarkDefault,
       watermarkExempt,
@@ -59,6 +63,22 @@ async function handler(req, res) {
         await r.set(k('settings:homeCount'), homeCount);
         await logAction(admin, 'settings.homeCount', String(homeCount));
         return res.json({ homeCount });
+      } catch {
+        return res.status(500).json({ error: 'Could not save' });
+      }
+    }
+
+    // Site name. An empty submission is a deliberate "reset to default" rather
+    // than an error, so this branch tests for the key's presence, not truthiness.
+    if (req.body?.siteName !== undefined) {
+      try {
+        const result = await setSiteName(req.body.siteName);
+        await logAction(
+          admin,
+          'settings.siteName',
+          result.cleared ? 'reset to default' : result.siteName
+        );
+        return res.json({ siteName: result.siteName });
       } catch {
         return res.status(500).json({ error: 'Could not save' });
       }

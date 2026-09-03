@@ -63,6 +63,8 @@ Further rows (2026-08-31):
 | `/api/admin/access-requests` | GET, POST, DELETE | `requireCapability(viewers.read)` on GET, `viewers.manage` on POST/DELETE | Read the queue vs act on it, the same split the Viewers tab already uses |
 | `/api/admin/schedule` | POST | `requireCapability(videos.manage)` | POST-only on purpose: windows are READ back with the video list in `/api/admin/videos`, so the tab needs one fetch, not two |
 
+| `/manifest.webmanifest` → `/api/manifest` | GET | **none — deliberately public**, second exception alongside `GET /api/theme` | Must be fetchable pre-login or the PWA is not installable. Leaks only the site name, which is already in every page title. Non-GET → 405. Served behind a `next.config.js` rewrite so the URL is unchanged from the static file it replaced — the middleware matcher still excludes it, so no session is rolled |
+
 **Email-verification overlay (2026-08-31):** when `REQUIRE_EMAIL_VERIFIED=1`,
 every row above and below additionally requires a boolean-`true` `email_verified`
 claim, because all of them resolve identity through `trustedEmail` (I1b). This

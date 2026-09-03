@@ -13,6 +13,7 @@ import { getVideo, signedEmbedUrl } from '../../lib/bunny';
 import { resolveWatermark, isExempt, getVideoMode, getGlobalDefault } from '../../lib/watermark';
 import { isGeoAllowed } from '../../lib/geo';
 import { withMonitorPage } from '../../lib/monitor';
+import { withSiteName } from '../../lib/siteNameStore';
 
 async function gssp({ req, res, params }) {
   const id = String(params.id || '');
@@ -101,11 +102,11 @@ async function gssp({ req, res, params }) {
   };
 }
 
-export const getServerSideProps = withMonitorPage(gssp);
+export const getServerSideProps = withMonitorPage(withSiteName(gssp));
 
-export default function Watch({ user, isAdmin: admin, video, embedUrl, initialTime, watermark }) {
+export default function Watch({ user, isAdmin: admin, video, embedUrl, initialTime, watermark, siteName }) {
   return (
-    <AppShell user={user} isAdmin={admin} approved wide>
+    <AppShell siteName={siteName} user={user} isAdmin={admin} approved wide>
       <Link href="/" className="back-link">
         <ChevronLeftIcon /> Library
       </Link>

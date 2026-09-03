@@ -8,6 +8,7 @@ import { isShareActive } from '../../lib/share';
 import { resolveWatermark, isExempt, getVideoMode, getGlobalDefault } from '../../lib/watermark';
 import { isGeoAllowed } from '../../lib/geo';
 import { withMonitorPage } from '../../lib/monitor';
+import { withSiteName } from '../../lib/siteNameStore';
 
 async function gssp({ req, res, params }) {
   const id = String(params.id || '');
@@ -101,12 +102,12 @@ async function gssp({ req, res, params }) {
   };
 }
 
-export const getServerSideProps = withMonitorPage(gssp);
+export const getServerSideProps = withMonitorPage(withSiteName(gssp));
 
-export default function Share({ state, user, title, embedUrl, videoId, expiresAt, shareId, watermark }) {
+export default function Share({ state, user, title, embedUrl, videoId, expiresAt, shareId, watermark, siteName }) {
   if (state === 'gone') {
     return (
-      <ShareShell user={user}>
+      <ShareShell siteName={siteName} user={user}>
         <div className="card card-pad notice">
           <h1>Link unavailable</h1>
           <p>This share link has expired or doesn&apos;t exist.</p>
@@ -116,7 +117,7 @@ export default function Share({ state, user, title, embedUrl, videoId, expiresAt
   }
   if (state === 'unverified') {
     return (
-      <ShareShell>
+      <ShareShell siteName={siteName}>
         <h1>Verify your email</h1>
         <p>
           You&apos;re signed in as <strong>{user?.email}</strong>, but that address hasn&apos;t been
@@ -128,7 +129,7 @@ export default function Share({ state, user, title, embedUrl, videoId, expiresAt
 
   if (state === 'mismatch') {
     return (
-      <ShareShell user={user}>
+      <ShareShell siteName={siteName} user={user}>
         <div className="card card-pad notice">
           <h1>Wrong account</h1>
           <p>
@@ -141,7 +142,7 @@ export default function Share({ state, user, title, embedUrl, videoId, expiresAt
   }
   if (state === 'blocked') {
     return (
-      <ShareShell user={user}>
+      <ShareShell siteName={siteName} user={user}>
         <div className="card card-pad notice">
           <h1>Not available in your region</h1>
           <p>This link isn&apos;t accessible from your current location.</p>
@@ -150,7 +151,7 @@ export default function Share({ state, user, title, embedUrl, videoId, expiresAt
     );
   }
   return (
-    <ShareShell user={user}>
+    <ShareShell siteName={siteName} user={user}>
       <h1 className="watch-title">{title}</h1>
       <ResumablePlayer
         embedUrl={embedUrl}

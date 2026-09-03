@@ -5,6 +5,7 @@ import { normalizeEmail, trustedEmail } from '../lib/auth';
 import { viewerAccessFor } from '../lib/guard';
 import { CAP } from '../lib/capabilities';
 import { withMonitorPage } from '../lib/monitor';
+import { withSiteName } from '../lib/siteNameStore';
 
 // Server-side gate mirrors pages/index.js: approved viewer or staff only —
 // via the same shared helper, so a role-holder is never told "not approved"
@@ -44,7 +45,7 @@ async function gssp({ req, res }) {
   };
 }
 
-export const getServerSideProps = withMonitorPage(gssp);
+export const getServerSideProps = withMonitorPage(withSiteName(gssp));
 
 async function api(path) {
   const res = await fetch(path);
@@ -70,7 +71,7 @@ function fmtWhen(iso) {
   return d.toLocaleString();
 }
 
-export default function Activity({ user, isAdmin: admin, canLookUpOthers, approved, unverified }) {
+export default function Activity({ user, isAdmin: admin, canLookUpOthers, approved, unverified, siteName }) {
   const [viewers, setViewers] = useState([]);
   const [selected, setSelected] = useState('__me__');
   const [items, setItems] = useState(null);
@@ -95,7 +96,7 @@ export default function Activity({ user, isAdmin: admin, canLookUpOthers, approv
 
   if (unverified) {
     return (
-      <AppShell user={user} isAdmin={false} approved={false}>
+      <AppShell siteName={siteName} user={user} isAdmin={false} approved={false}>
         <div className="card card-pad notice">
           <h1>Verify your email</h1>
           <p>
@@ -109,7 +110,7 @@ export default function Activity({ user, isAdmin: admin, canLookUpOthers, approv
 
   if (!approved) {
     return (
-      <AppShell user={user} isAdmin={admin} approved={false}>
+      <AppShell siteName={siteName} user={user} isAdmin={admin} approved={false}>
         <div className="card card-pad notice">
           <h1>Not approved yet</h1>
           <p>
@@ -122,7 +123,7 @@ export default function Activity({ user, isAdmin: admin, canLookUpOthers, approv
   }
 
   return (
-    <AppShell user={user} isAdmin={admin} approved>
+    <AppShell siteName={siteName} user={user} isAdmin={admin} approved>
       <h1>{selected === '__me__' ? 'My activity' : `Activity — ${selected}`}</h1>
 
       {canLookUpOthers ? (

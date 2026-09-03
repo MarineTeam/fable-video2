@@ -1,14 +1,16 @@
 import Link from 'next/link';
 import NotifyButton from './NotifyButton';
 import { LogoIcon } from './icons';
+import { siteNameOrDefault } from '../lib/siteName';
 
-export default function AppShell({ user, isAdmin, approved, wide, children }) {
+export default function AppShell({ user, isAdmin, approved, wide, siteName, children }) {
+  const name = siteNameOrDefault(siteName);
   return (
     <div className="shell">
       <header className="topbar">
         <Link href="/" className="brand">
           <LogoIcon />
-          <span>Marine Video Portal</span>
+          <span>{name}</span>
         </Link>
         <div className="topbar-actions">
           {approved ? (

@@ -1,15 +1,17 @@
 import { LogoIcon } from './icons';
+import { siteNameOrDefault } from '../lib/siteName';
 
 // Minimal shell shared by recipient-facing private-link pages (/s/[id],
 // /b/[id]): recipients aren't necessarily approved viewers, so no library
 // navigation here.
-export default function ShareShell({ user, children }) {
+export default function ShareShell({ user, siteName, children }) {
+  const name = siteNameOrDefault(siteName);
   return (
     <div className="shell">
       <header className="topbar">
         <span className="brand">
           <LogoIcon />
-          <span>Marine Video Portal</span>
+          <span>{name}</span>
         </span>
         <div className="topbar-actions">
           {user ? <span className="user-email">{user.email}</span> : null}
