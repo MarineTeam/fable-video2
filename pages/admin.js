@@ -21,6 +21,7 @@ import { rollupSharesByVideo } from '../lib/videoAnalytics';
 import { windowState } from '../lib/schedule';
 import { DEFAULT_SITE_NAME, MAX_SITE_NAME_LENGTH } from '../lib/siteName';
 import { chaptersToText } from '../lib/chapters';
+import { MAX_NOTES_LENGTH } from '../lib/notes';
 import { isGeoAllowed } from '../lib/geo';
 import { withMonitorPage } from '../lib/monitor';
 import { withSiteName } from '../lib/siteNameStore';
@@ -252,6 +253,9 @@ function VideosTab({
   const [shareFor, setShareFor] = useState(null); // guid
   const [privateListFor, setPrivateListFor] = useState(null); // guid
   const [scheduleFor, setScheduleFor] = useState(null); // guid
+  const [notesFor, setNotesFor] = useState(null); // guid
+  const [notesDraft, setNotesDraft] = useState('');
+  const [notesStatus, setNotesStatus] = useState('');
   const [chaptersFor, setChaptersFor] = useState(null); // guid
   const [chaptersDraft, setChaptersDraft] = useState('');
   const [chaptersStatus, setChaptersStatus] = useState('');
@@ -400,6 +404,24 @@ function VideosTab({
       else next.add(guid);
       return next;
     });
+  }
+
+  function openNotes(guid, current) {
+    setNotesStatus('');
+    setNotesFor(notesFor === guid ? null : guid);
+    setNotesDraft(current || '');
+  }
+
+  async function saveNotes(guid) {
+    setNotesStatus('');
+    try {
+      const data = await api('/api/admin/notes', { method: 'POST', body: { guid, notes: notesDraft } });
+      setNotesDraft(data.notes || '');
+      setNotesStatus(data.notes ? 'Saved.' : 'Cleared.');
+      reloadVideos();
+    } catch (err) {
+      setNotesStatus(err.message);
+    }
   }
 
   function openChapters(guid, current) {
@@ -798,6 +820,15 @@ function VideosTab({
             <button
               type="button"
               className="btn btn-ghost btn-sm"
+              onClick={() => openNotes(v.guid, v.notes)}
+              title="Notes and passages for this talk — searchable by viewers"
+            >
+              Notes
+              {v.notes ? <span className="tab-badge">•</span> : null}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
               onClick={() => openChapters(v.guid, v.chapters)}
               title="Timestamps viewers can click to jump into a long recording"
             >
@@ -848,6 +879,41 @@ function VideosTab({
                 viewers={viewers}
                 onChanged={() => reloadShares()}
               />
+            ) : null}
+            {notesFor === v.guid ? (
+              <div className="card card-pad">
+                <h3 className="section-title">Notes</h3>
+                <p className="muted">
+                  Shown under the player and matched by viewer search, so a talk can be found by
+                  what it covered rather than only by its title. Plain text — line breaks are kept,
+                  formatting marks are not. Clear the box to remove them.
+                </p>
+                <textarea
+                  className="textarea"
+                  rows={8}
+                  maxLength={MAX_NOTES_LENGTH}
+                  value={notesDraft}
+                  onChange={(e) => setNotesDraft(e.target.value)}
+                  placeholder={'Philippians 4:4-9 — contentment and the peace of God.'}
+                  aria-label="Notes"
+                />
+                <div className="field-row">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => saveNotes(v.guid)}
+                  >
+                    Save notes
+                  </button>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setNotesFor(null)}>
+                    Cancel
+                  </button>
+                  <span className="muted">
+                    {notesDraft.length}/{MAX_NOTES_LENGTH}
+                  </span>
+                  {notesStatus ? <span className="muted">{notesStatus}</span> : null}
+                </div>
+              </div>
             ) : null}
             {chaptersFor === v.guid ? (
               <div className="card card-pad">

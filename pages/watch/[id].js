@@ -10,6 +10,7 @@ import { contentScopeFor, isVideoVisible } from '../../lib/groups';
 import { isWithinWindow } from '../../lib/schedule';
 import { getVideoWindow } from '../../lib/scheduleStore';
 import { getVideoChapters } from '../../lib/chaptersStore';
+import { getVideoNotes } from '../../lib/notesStore';
 import { getVideo, signedEmbedUrl } from '../../lib/bunny';
 import { resolveWatermark, isExempt, getVideoMode, getGlobalDefault } from '../../lib/watermark';
 import { isGeoAllowed } from '../../lib/geo';
@@ -80,6 +81,7 @@ async function gssp({ req, res, params }) {
   // Navigation sugar: a failed read degrades to no chapter list, never to a
   // broken page (lib/chaptersStore.js already swallows).
   const chapters = await getVideoChapters(video.guid);
+  const notes = await getVideoNotes(video.guid);
 
   // Best-effort — a watermark hiccup must never block playback (see
   // lib/watermark.js). No share record on a regular watch page, so only the
@@ -104,6 +106,7 @@ async function gssp({ req, res, params }) {
       initialTime,
       watermark,
       chapters,
+      notes,
     },
   };
 }
@@ -119,6 +122,7 @@ export default function Watch({
   watermark,
   siteName,
   chapters,
+  notes,
 }) {
   return (
     <AppShell siteName={siteName} user={user} isAdmin={admin} approved wide>
@@ -135,6 +139,15 @@ export default function Watch({
         watermarkLabel={user.email}
         chapters={chapters}
       />
+      {notes ? (
+        <section className="card card-pad video-notes">
+          <h2 className="section-title">Notes</h2>
+          {/* Plain text with line breaks preserved by CSS. React escapes text
+              nodes, so there is no markup to sanitise — which is exactly why
+              the field does not accept markup. */}
+          <p className="notes-body">{notes}</p>
+        </section>
+      ) : null}
     </AppShell>
   );
 }

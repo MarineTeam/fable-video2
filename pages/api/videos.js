@@ -1,14 +1,21 @@
 import { withMonitorApi } from "../../lib/monitor";
 import { requireViewer } from '../../lib/guard';
 import { allowRequest } from '../../lib/ratelimit';
-import { listVideos, thumbnailUrl, isPlayable } from '../../lib/bunny';
+import { listVideos, getVideo, thumbnailUrl, isPlayable } from '../../lib/bunny';
 import { redis, k } from '../../lib/redis';
 import { applyOrder } from '../../lib/order';
 import { contentScopeFor, filterVideosByScope } from '../../lib/groups';
 import { filterVideosBySchedule } from '../../lib/schedule';
 import { loadSchedule } from '../../lib/scheduleStore';
+import { matchingNoteGuids } from '../../lib/notes';
+import { loadAllNotes } from '../../lib/notesStore';
 
 const PAGE_SIZE = 10;
+
+// Cap on how many note-only matches are pulled in by guid on a single search.
+// Each one is a Bunny round trip, and a search that matched a hundred notes
+// would be useless to read anyway.
+const MAX_NOTE_MATCHES = 25;
 
 async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
@@ -40,9 +47,42 @@ async function handler(req, res) {
   const order = Array.isArray(orderRaw) ? orderRaw : [];
 
   try {
+    // Title search stays server-side at Bunny, which searches the WHOLE
+    // library. Dropping it to filter locally would only ever see the first
+    // page (<=100), silently regressing search for a large library — so notes
+    // are added as a UNION instead: Bunny's title matches, plus the videos
+    // whose notes match, fetched by guid.
+    //
+    // Access is unaffected by any of this. Every candidate, however it got
+    // here, goes through exactly the same isPlayable -> group scope ->
+    // publish window pipeline below, so widening the search can never widen
+    // what a given viewer is allowed to see.
     const data = await listVideos({ page: 1, perPage: Math.min(homeCount, 100), search, collection });
+    const found = (data?.items || []).filter(isPlayable);
+
+    let candidates = found;
+    if (search) {
+      const seen = new Set(found.map((v) => v.guid));
+      const extraGuids = matchingNoteGuids(await loadAllNotes(), search)
+        .filter((guid) => !seen.has(guid))
+        .slice(0, MAX_NOTE_MATCHES);
+      if (extraGuids.length) {
+        const fetched = await Promise.all(
+          // A video whose note record outlived the video itself simply drops
+          // out — a stale note must not break the whole search.
+          extraGuids.map((guid) => getVideo(guid).catch(() => null))
+        );
+        candidates = found.concat(fetched.filter((v) => v?.guid && isPlayable(v)));
+      }
+      // A note match for a video outside the requested collection would
+      // quietly widen a collection filter, so honour it here too.
+      if (collection) {
+        candidates = candidates.filter((v) => (v.collectionId || '') === collection);
+      }
+    }
+
     const playable = filterVideosBySchedule(
-      filterVideosByScope((data?.items || []).filter(isPlayable), scope),
+      filterVideosByScope(candidates, scope),
       schedule
     );
     const capped = applyOrder(playable, order).slice(0, homeCount);

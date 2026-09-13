@@ -1180,3 +1180,15 @@ button.chapter-link:focus-visible {
 .chapter-label {
   flex: 1 1 auto;
 }
+
+/* Video notes (lib/notes.js). Plain text: line breaks are preserved by CSS
+   rather than by rendering markup, so nothing here needs sanitising. */
+.video-notes {
+  margin-top: 16px;
+}
+.notes-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+  color: var(--text);
+}
