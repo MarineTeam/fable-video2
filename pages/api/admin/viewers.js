@@ -7,6 +7,7 @@ import { logAction } from '../../../lib/audit';
 import { getAllViewerTags, distinctTags, clearViewerTags } from '../../../lib/viewerTags';
 import { clearRolesForEmail } from '../../../lib/roles';
 import { clearGroupsForEmail } from '../../../lib/groups';
+import { revokeFeedToken } from '../../../lib/podcastStore';
 
 async function handler(req, res) {
   const admin = await requireCapability(req, res, req.method === 'GET' ? CAP.VIEWERS_READ : CAP.VIEWERS_MANAGE);
@@ -76,6 +77,9 @@ async function handler(req, res) {
       // back to life if the same address is re-added later.
       await clearRolesForEmail(email);
       await clearGroupsForEmail(email);
+      // A feed token is a bearer credential that survives outside the session,
+      // so it must die with the account rather than outlive it.
+      await revokeFeedToken(email);
       await logAction(admin, 'viewer.remove', email);
       return res.json({ ok: true });
     } catch {
