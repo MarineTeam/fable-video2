@@ -77,6 +77,7 @@ from repo root — re-run it before trusting this table).
 | Share-link email | `RESEND_API_KEY` set (`lib/mail.js:4-6`) | "Email the link" checkbox and "Resend email" button hidden; nothing ever sent |
 | Thumbnails | `BUNNY_CDN_HOSTNAME` set | Title list instead of grid (playback unaffected) |
 | Email-verification enforcement | `REQUIRE_EMAIL_VERIFIED=1` | Access trusts the session email claim as-is — the pre-2026-08-31 behaviour. Note this is the one "inert" default that leaves a security gap open rather than a feature switched off: turn it on as soon as the claim is confirmed on a preview |
+| Podcast feed | `BUNNY_CDN_HOSTNAME` set (and MP4 Fallback enabled on the Bunny library) | `/api/feed/<token>` 404s and the viewer-facing feed section is hidden — without a CDN host there is no enclosure URL, and a feed of broken links is worse than no feed |
 | Group content gating | `GROUP_CONTENT_GATING=1` | Groups are membership bookkeeping only — scopes are recorded in /admin → Groups but restrict nobody's library |
 | Sentry capture | Respective DSN set | Completely inert (SDK never initialized) |
 | Sentry source maps | `SENTRY_AUTH_TOKEN` (+ org/project) at build | Maps not uploaded; stack traces are minified |
