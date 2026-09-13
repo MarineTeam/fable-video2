@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { formatTimestamp } from '../lib/chapters';
 
 function postShareEvent(shareId, payload) {
   fetch('/api/share-event', {
@@ -22,8 +23,15 @@ export default function ResumablePlayer({
   shareId = '',
   watermark = false,
   watermarkLabel = '',
+  chapters = [],
 }) {
   const iframeRef = useRef(null);
+  // The player instance lives here so the chapter list below can seek it, and
+  // `canSeek` gates that: until player.js has loaded and reported ready, the
+  // chapters render as plain text rather than as buttons that would do
+  // nothing. A broken player must never produce a broken-looking list.
+  const playerRef = useRef(null);
+  const [canSeek, setCanSeek] = useState(false);
   const lastSentRef = useRef(0);
   const playedRef = useRef(false);
   const furthestRef = useRef(0);
@@ -38,7 +46,9 @@ export default function ResumablePlayer({
         const playerjs = mod.default && mod.default.Player ? mod.default : mod;
         if (cancelled || !iframeRef.current || !playerjs.Player) return;
         player = new playerjs.Player(iframeRef.current);
+        playerRef.current = player;
         player.on('ready', () => {
+          setCanSeek(true);
           if (initialTime > 5) {
             try {
               player.setCurrentTime(initialTime);
@@ -86,6 +96,8 @@ export default function ResumablePlayer({
     })();
     return () => {
       cancelled = true;
+      playerRef.current = null;
+      setCanSeek(false);
       try {
         if (player && player.off) {
           player.off('timeupdate');
@@ -97,8 +109,20 @@ export default function ResumablePlayer({
     };
   }, [embedUrl, videoId, initialTime, title, shareId]);
 
+  function seekTo(seconds) {
+    const player = playerRef.current;
+    if (!player) return;
+    try {
+      player.setCurrentTime(seconds);
+      player.play();
+    } catch {
+      // A seek that fails leaves playback exactly as it was.
+    }
+  }
+
   return (
-    <div className="player-frame">
+    <>
+      <div className="player-frame">
       <iframe
         ref={iframeRef}
         src={embedUrl}
@@ -111,6 +135,29 @@ export default function ResumablePlayer({
           <span>{watermarkLabel}</span>
         </div>
       ) : null}
-    </div>
+      </div>
+      {chapters.length > 0 ? (
+        <div className="chapter-list card card-pad">
+          <h2 className="section-title">Chapters</h2>
+          <ol className="chapter-rows">
+            {chapters.map((c) => (
+              <li key={c.at} className="chapter-row">
+                {canSeek ? (
+                  <button type="button" className="chapter-link" onClick={() => seekTo(c.at)}>
+                    <span className="chapter-at">{formatTimestamp(c.at)}</span>
+                    <span className="chapter-label">{c.label}</span>
+                  </button>
+                ) : (
+                  <span className="chapter-link chapter-static">
+                    <span className="chapter-at">{formatTimestamp(c.at)}</span>
+                    <span className="chapter-label">{c.label}</span>
+                  </span>
+                )}
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
+    </>
   );
 }

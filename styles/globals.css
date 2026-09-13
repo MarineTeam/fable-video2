@@ -1130,3 +1130,53 @@ code {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Chapter list under the player (lib/chapters.js). Rendered as buttons once
+   player.js is ready and as plain text otherwise, so a player that failed to
+   load never shows controls that do nothing. */
+.chapter-list {
+  margin-top: 16px;
+}
+.chapter-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.chapter-row {
+  margin: 0;
+}
+.chapter-link {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+button.chapter-link {
+  cursor: pointer;
+}
+button.chapter-link:hover,
+button.chapter-link:focus-visible {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.chapter-static {
+  cursor: default;
+}
+.chapter-at {
+  flex: 0 0 auto;
+  min-width: 62px;
+  color: var(--accent2);
+  font-variant-numeric: tabular-nums;
+}
+.chapter-label {
+  flex: 1 1 auto;
+}

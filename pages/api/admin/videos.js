@@ -10,6 +10,7 @@ import {
 import { redis, k } from '../../../lib/redis';
 import { applyOrder } from '../../../lib/order';
 import { loadSchedule, clearVideoWindow } from '../../../lib/scheduleStore';
+import { loadAllChapters, clearVideoChapters } from '../../../lib/chaptersStore';
 import { announceNewVideos } from '../../../lib/push';
 import { logAction } from '../../../lib/audit';
 import { getVideoModes, setVideoMode, clampWatermarkMode } from '../../../lib/watermark';
@@ -31,6 +32,9 @@ async function handler(req, res) {
       // Served with the list, like watermark modes, so the Videos tab renders
       // publish-window badges without a second round trip.
       const schedule = await loadSchedule();
+      // Same reasoning as the publish windows above: shipped with the list so
+      // the Videos tab needs one fetch rather than two.
+      const chapters = await loadAllChapters();
       return res.json({
         videos: ordered.map((v) => ({
           guid: v.guid,
@@ -44,6 +48,7 @@ async function handler(req, res) {
           thumbnail: thumbnailUrl(v),
           watermarkMode: watermarkModes[v.guid] || 'default',
           schedule: schedule[v.guid] || null,
+          chapters: chapters[v.guid] || [],
         })),
       });
     } catch {
@@ -92,6 +97,7 @@ async function handler(req, res) {
       } catch {}
       // And from the publish-window hash, same no-orphans contract.
       await clearVideoWindow(id);
+      await clearVideoChapters(id);
       await logAction(admin, 'video.delete', id);
       return res.json({ ok: true });
     } catch {

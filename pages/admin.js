@@ -20,6 +20,7 @@ import { PRESETS, COLOR_KEYS, applyTheme, validateTheme, THEME_STORAGE_KEY } fro
 import { rollupSharesByVideo } from '../lib/videoAnalytics';
 import { windowState } from '../lib/schedule';
 import { DEFAULT_SITE_NAME, MAX_SITE_NAME_LENGTH } from '../lib/siteName';
+import { chaptersToText } from '../lib/chapters';
 import { isGeoAllowed } from '../lib/geo';
 import { withMonitorPage } from '../lib/monitor';
 import { withSiteName } from '../lib/siteNameStore';
@@ -251,6 +252,10 @@ function VideosTab({
   const [shareFor, setShareFor] = useState(null); // guid
   const [privateListFor, setPrivateListFor] = useState(null); // guid
   const [scheduleFor, setScheduleFor] = useState(null); // guid
+  const [chaptersFor, setChaptersFor] = useState(null); // guid
+  const [chaptersDraft, setChaptersDraft] = useState('');
+  const [chaptersStatus, setChaptersStatus] = useState('');
+  const [chaptersIgnored, setChaptersIgnored] = useState([]);
   const [scheduleDraft, setScheduleDraft] = useState({ from: '', until: '' });
   const [scheduleError, setScheduleError] = useState('');
   const [copiedId, setCopiedId] = useState('');
@@ -395,6 +400,36 @@ function VideosTab({
       else next.add(guid);
       return next;
     });
+  }
+
+  function openChapters(guid, current) {
+    setChaptersStatus('');
+    setChaptersIgnored([]);
+    setChaptersFor(chaptersFor === guid ? null : guid);
+    setChaptersDraft(chaptersToText(current || []));
+  }
+
+  async function saveChapters(guid, durationSeconds) {
+    setChaptersStatus('');
+    setChaptersIgnored([]);
+    try {
+      const data = await api('/api/admin/chapters', {
+        method: 'POST',
+        body: { guid, text: chaptersDraft, durationSeconds },
+      });
+      // Never swallow the skipped lines — an admin who sees "Saved" while a
+      // typo'd line vanished will conclude the feature is broken.
+      setChaptersIgnored(data.ignored || []);
+      setChaptersStatus(
+        data.ignored?.length
+          ? `Saved ${data.chapters.length} — ${data.ignored.length} line(s) skipped.`
+          : `Saved ${data.chapters.length} chapter(s).`
+      );
+      setChaptersDraft(chaptersToText(data.chapters));
+      reloadVideos();
+    } catch (err) {
+      setChaptersStatus(err.message);
+    }
   }
 
   async function saveSchedule(guid, from, until) {
@@ -763,6 +798,15 @@ function VideosTab({
             <button
               type="button"
               className="btn btn-ghost btn-sm"
+              onClick={() => openChapters(v.guid, v.chapters)}
+              title="Timestamps viewers can click to jump into a long recording"
+            >
+              Chapters
+              {v.chapters?.length ? <span className="tab-badge">{v.chapters.length}</span> : null}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
               onClick={() => openSchedule(v.guid, v.schedule)}
               title="Hide this video until a date, after a date, or both"
             >
@@ -804,6 +848,51 @@ function VideosTab({
                 viewers={viewers}
                 onChanged={() => reloadShares()}
               />
+            ) : null}
+            {chaptersFor === v.guid ? (
+              <div className="card card-pad">
+                <h3 className="section-title">Chapters</h3>
+                <p className="muted">
+                  One per line, timestamp first: <code>24:15 Sermon</code>. Accepts
+                  <code> M:SS</code>, <code>MM:SS</code> and <code>H:MM:SS</code>. They are sorted by
+                  time on save, so the order you type them in doesn&apos;t matter. Clear the box to
+                  remove them.
+                </p>
+                <textarea
+                  className="textarea"
+                  rows={6}
+                  value={chaptersDraft}
+                  onChange={(e) => setChaptersDraft(e.target.value)}
+                  placeholder={'0:00 Worship\n18:30 Announcements\n24:15 Sermon'}
+                  aria-label="Chapters"
+                />
+                {chaptersIgnored.length > 0 ? (
+                  <ul className="bulk-share-result">
+                    {chaptersIgnored.map((row) => (
+                      <li key={row.line}>
+                        Line {row.line} skipped — {row.reason}: <code>{row.text}</code>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+                <div className="field-row">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => saveChapters(v.guid, v.length || 0)}
+                  >
+                    Save chapters
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => setChaptersFor(null)}
+                  >
+                    Cancel
+                  </button>
+                  {chaptersStatus ? <span className="muted">{chaptersStatus}</span> : null}
+                </div>
+              </div>
             ) : null}
             {scheduleFor === v.guid ? (
               <div className="card card-pad">

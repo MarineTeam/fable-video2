@@ -9,6 +9,7 @@ import { viewerAccessFor } from '../../lib/guard';
 import { contentScopeFor, isVideoVisible } from '../../lib/groups';
 import { isWithinWindow } from '../../lib/schedule';
 import { getVideoWindow } from '../../lib/scheduleStore';
+import { getVideoChapters } from '../../lib/chaptersStore';
 import { getVideo, signedEmbedUrl } from '../../lib/bunny';
 import { resolveWatermark, isExempt, getVideoMode, getGlobalDefault } from '../../lib/watermark';
 import { isGeoAllowed } from '../../lib/geo';
@@ -76,6 +77,10 @@ async function gssp({ req, res, params }) {
     .hset(k('viewer:lastseen'), { [email]: new Date().toISOString() })
     .catch(() => {});
 
+  // Navigation sugar: a failed read degrades to no chapter list, never to a
+  // broken page (lib/chaptersStore.js already swallows).
+  const chapters = await getVideoChapters(video.guid);
+
   // Best-effort — a watermark hiccup must never block playback (see
   // lib/watermark.js). No share record on a regular watch page, so only the
   // video's own setting and the global default can apply.
@@ -98,13 +103,23 @@ async function gssp({ req, res, params }) {
       embedUrl: signedEmbedUrl(video.guid),
       initialTime,
       watermark,
+      chapters,
     },
   };
 }
 
 export const getServerSideProps = withMonitorPage(withSiteName(gssp));
 
-export default function Watch({ user, isAdmin: admin, video, embedUrl, initialTime, watermark, siteName }) {
+export default function Watch({
+  user,
+  isAdmin: admin,
+  video,
+  embedUrl,
+  initialTime,
+  watermark,
+  siteName,
+  chapters,
+}) {
   return (
     <AppShell siteName={siteName} user={user} isAdmin={admin} approved wide>
       <Link href="/" className="back-link">
@@ -118,6 +133,7 @@ export default function Watch({ user, isAdmin: admin, video, embedUrl, initialTi
         title={video.title}
         watermark={watermark}
         watermarkLabel={user.email}
+        chapters={chapters}
       />
     </AppShell>
   );
