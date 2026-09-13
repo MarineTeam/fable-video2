@@ -12,6 +12,7 @@ import { applyOrder } from '../../../lib/order';
 import { loadSchedule, clearVideoWindow } from '../../../lib/scheduleStore';
 import { loadAllChapters, clearVideoChapters } from '../../../lib/chaptersStore';
 import { loadAllNotes, clearVideoNotes } from '../../../lib/notesStore';
+import { loadPublicVideoGuids, clearVideoPublic } from '../../../lib/publicVideosStore';
 import { announceNewVideos } from '../../../lib/push';
 import { logAction } from '../../../lib/audit';
 import { getVideoModes, setVideoMode, clampWatermarkMode } from '../../../lib/watermark';
@@ -37,6 +38,7 @@ async function handler(req, res) {
       // the Videos tab needs one fetch rather than two.
       const chapters = await loadAllChapters();
       const notes = await loadAllNotes();
+      const publicGuids = await loadPublicVideoGuids();
       return res.json({
         videos: ordered.map((v) => ({
           guid: v.guid,
@@ -52,6 +54,7 @@ async function handler(req, res) {
           schedule: schedule[v.guid] || null,
           chapters: chapters[v.guid] || [],
           notes: notes[v.guid] || '',
+          isPublic: publicGuids.has(v.guid),
         })),
       });
     } catch {
@@ -102,6 +105,7 @@ async function handler(req, res) {
       await clearVideoWindow(id);
       await clearVideoChapters(id);
       await clearVideoNotes(id);
+      await clearVideoPublic(id);
       await logAction(admin, 'video.delete', id);
       return res.json({ ok: true });
     } catch {

@@ -24,6 +24,7 @@ export default function ResumablePlayer({
   watermark = false,
   watermarkLabel = '',
   chapters = [],
+  trackProgress = true,
 }) {
   const iframeRef = useRef(null);
   // The player instance lives here so the chapter list below can seek it, and
@@ -67,6 +68,10 @@ export default function ResumablePlayer({
             });
           }
           player.on('timeupdate', ({ seconds, duration }) => {
+            // The public watch page passes trackProgress={false}: an anonymous
+            // visitor has no email to key history against, so reporting would
+            // only fire 401s at a guarded endpoint.
+            if (!trackProgress) return;
             const now = Date.now();
             if (!duration || now - lastSentRef.current < 5000) return;
             lastSentRef.current = now;
@@ -107,7 +112,7 @@ export default function ResumablePlayer({
         }
       } catch {}
     };
-  }, [embedUrl, videoId, initialTime, title, shareId]);
+  }, [embedUrl, videoId, initialTime, title, shareId, trackProgress]);
 
   function seekTo(seconds) {
     const player = playerRef.current;

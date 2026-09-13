@@ -260,6 +260,7 @@ function VideosTab({
   const [chaptersDraft, setChaptersDraft] = useState('');
   const [chaptersStatus, setChaptersStatus] = useState('');
   const [chaptersIgnored, setChaptersIgnored] = useState([]);
+  const [publicStatus, setPublicStatus] = useState('');
   const [scheduleDraft, setScheduleDraft] = useState({ from: '', until: '' });
   const [scheduleError, setScheduleError] = useState('');
   const [copiedId, setCopiedId] = useState('');
@@ -410,6 +411,24 @@ function VideosTab({
     setNotesStatus('');
     setNotesFor(notesFor === guid ? null : guid);
     setNotesDraft(current || '');
+  }
+
+  async function togglePublic(guid, next) {
+    if (
+      next &&
+      !window.confirm(
+        'Make this video watchable by anyone with the link, with no account and no sign-in?'
+      )
+    ) {
+      return;
+    }
+    setPublicStatus('');
+    try {
+      await api('/api/admin/public-video', { method: 'POST', body: { guid, isPublic: next } });
+      reloadVideos();
+    } catch (err) {
+      setPublicStatus(err.message);
+    }
   }
 
   async function saveNotes(guid) {
@@ -710,6 +729,7 @@ function VideosTab({
         />
       ) : null}
 
+      {publicStatus ? <p className="error-text">{publicStatus}</p> : null}
       <div className="admin-rows">
         {shown.map((v, i) => (
           <div
@@ -817,6 +837,27 @@ function VideosTab({
             >
               Private list
             </button>
+            <button
+              type="button"
+              className={v.isPublic ? 'btn btn-sm btn-primary' : 'btn btn-ghost btn-sm'}
+              onClick={() => togglePublic(v.guid, !v.isPublic)}
+              title={
+                v.isPublic
+                  ? 'Anyone with the link can watch this without signing in. Click to make it private again.'
+                  : 'Private. Click to let anyone with the link watch it without an account.'
+              }
+            >
+              {v.isPublic ? 'Public' : 'Private'}
+            </button>
+            {v.isPublic ? (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => copyText(`${window.location.origin}/watch/public/${v.guid}`, v.guid)}
+              >
+                {copiedId === v.guid ? <CheckIcon /> : <CopyIcon />} Public link
+              </button>
+            ) : null}
             <button
               type="button"
               className="btn btn-ghost btn-sm"
