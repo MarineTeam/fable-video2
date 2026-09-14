@@ -65,6 +65,24 @@ Further rows (2026-08-31):
 
 | `/manifest.webmanifest` → `/api/manifest` | GET | **none — deliberately public**, second exception alongside `GET /api/theme` | Must be fetchable pre-login or the PWA is not installable. Leaks only the site name, which is already in every page title. Non-GET → 405. Served behind a `next.config.js` rewrite so the URL is unchanged from the static file it replaced — the middleware matcher still excludes it, so no session is rolled |
 
+Further rows (2026-09-13) — the admin routes follow the same
+`requireCapability` shape, the last two are the notable ones:
+
+| Surface | Methods | Guard | Notes |
+|---|---|---|---|
+| `/api/admin/chapters`, `/api/admin/notes`, `/api/admin/public-video` | POST | `requireCapability(videos.manage)` | Guard runs BEFORE `req.method`, so an unauthorised caller cannot learn the verb from a 405. Reads ship with `/api/admin/videos` |
+| `/watch/public/[id]` | page | **none — deliberately public**, logic in `lib/publicWatch.js` | Default deny (store fails CLOSED), publish window applies, viewer geo whitelist applies, groups and watermark deliberately do not. Identical `notFound` for not-public / out-of-window / malformed id, so it is not an oracle. No search, no listing, no counts, no progress/activity/push. Signed time-limited embed |
+| `/api/feed/[token]` | GET | **token-authenticated, the only non-session auth in the app** | Podcast apps cannot log in, so the URL IS the credential. Token → one viewer; that viewer's CURRENT access re-checked every fetch; items through the same isPlayable → group scope → publish window pipeline; identical bare 404 for wrong/revoked/malformed tokens; `private, no-store`. Enclosures are signed CDN URLs, 48h TTL |
+| `/api/feed-token` | GET, POST | `requireViewer` | Only ever touches the caller's own token — no parameter names anyone else. POST regenerates, which revokes the previous URL |
+
+**Signed-out verification (2026-09-13, run against a dev server rather than
+reasoned about):** `/watch/public/<guid>` → 404, `/api/feed/<token>` → 404,
+`/api/feed-token` → 401, while `/`, `/admin`, `/watch/<guid>` and `/activity`
+→ 307 `/auth/login`. Both new public surfaces therefore run without a session
+and **no `middleware.js` matcher change was needed**; `middleware.js` is
+unmodified. Re-run this whenever a new public surface is added — reasoning
+about the matcher is not the same as loading the URL.
+
 **Email-verification overlay (2026-08-31):** when `REQUIRE_EMAIL_VERIFIED=1`,
 every row above and below additionally requires a boolean-`true` `email_verified`
 claim, because all of them resolve identity through `trustedEmail` (I1b). This

@@ -28,6 +28,31 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 
 ## Homepage & viewer experience
 - **Modern dark design** — glassmorphism, gradient accents, Inter typography.
+- **Chapters** _(admin, Videos tab)_ — timestamps viewers click to jump into a long recording. One per line,
+  `24:15 Sermon`, accepting `M:SS`, `MM:SS` and `H:MM:SS`, sorted by time on save so typed order never matters. Lines that
+  cannot be used are reported back with their line number and a reason rather than silently dropped. The list renders under
+  the player and only becomes clickable once player.js reports ready — if it never loads, the chapters stay readable as
+  plain text rather than becoming buttons that do nothing.
+- **Notes** _(admin, Videos tab)_ — free text per video, shown under the player and **matched by viewer search**, so a talk
+  can be found by what it covered rather than only by its title. Search is a union: Bunny still runs the title search across
+  the whole library, and videos whose notes match are added by id (capped per search). Every candidate goes through the same
+  access pipeline, so a note match can never surface a video a viewer may not see. Rendered as plain text with line breaks
+  preserved — no markup is accepted, which is why none needs sanitising.
+- **Public (unlisted) videos** _(admin, Videos tab)_ — share one talk with someone who has no account. Default deny: a video
+  is public only when explicitly marked, and the store fails **closed**. Served from a separate `/watch/public/[id]` route
+  rather than by relaxing the invite-only ones, so the entire anonymous surface is one file to audit. The publish window and
+  the viewer geo whitelist still apply; groups do not (they narrow viewer access and a visitor is not a viewer) and there is
+  no watermark (it stamps the viewer's own address, and a visitor has none). No search, no library listing, no counts, no
+  progress tracking. Playback is still a signed, time-limited embed token — public means no login, not an unsigned URL.
+- **Podcast feed** _(viewer, Activity page)_ — a private per-subscriber RSS feed for listening in a podcast app. **Carries
+  video, not audio:** bunny.net Stream has no audio-only rendition, so the enclosure points at the smallest MP4 the library
+  offers, and a service is still a large download. The feed URL is a bearer credential (podcast apps cannot log in), so the
+  UI says to treat it like a password and "New link" revokes the old one immediately. Access is re-checked on every fetch,
+  items obey groups and publish windows, and removing a viewer revokes their feed. Inert without `BUNNY_CDN_HOSTNAME`, and
+  needs MP4 Fallback enabled on the Bunny library.
+- **Access-request notifications** — a genuinely new request emails and pushes everyone holding `viewers.manage`, addressed
+  by capability rather than a hardcoded list. A re-ask while one is pending does not re-notify, and a notification failure
+  never fails the request itself.
 - **Adjustable site name** _(admin, Settings tab)_ — the portal's display name, editable live with no redeploy.
   Applies to the header on every page, the recipient-facing share/bundle shell, the browser tab title, and the PWA
   manifest (so an installed app carries it too). Resolved **server-side** and passed through page props rather than

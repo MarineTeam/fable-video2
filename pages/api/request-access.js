@@ -1,11 +1,11 @@
 import { withMonitorApi } from '../../lib/monitor';
 import { auth0 } from '../../lib/auth0';
-import { trustedEmail, adminEmails } from '../../lib/auth';
+import { trustedEmail } from '../../lib/auth';
 import { viewerAccessFor } from '../../lib/guard';
 import { allowRequest } from '../../lib/ratelimit';
 import { logAction } from '../../lib/audit';
 import { recordAccessRequest, normalizeNote } from '../../lib/accessRequests';
-import { sendAccessRequestEmail } from '../../lib/mail';
+import { notifyNewAccessRequest } from '../../lib/accessRequestNotify';
 
 // The one route in the app deliberately reachable by a signed-in user who is
 // NOT an approved viewer — that is the entire feature. It is therefore guarded
@@ -41,10 +41,20 @@ async function handler(req, res) {
   }
   if (!result.ok) return res.status(429).json({ error: result.error });
 
+  // Only a genuinely NEW request notifies. A re-ask while one is already
+  // pending is an idempotent no-op, so refreshing this page cannot turn into a
+  // notification flood.
   if (!result.duplicate) {
     await logAction(email, 'access.request', note ? `"${note}"` : '(no note)');
-    // Best-effort, inert without RESEND_API_KEY — house idiom.
-    sendAccessRequestEmail({ to: adminEmails(), requester: email, note }).catch(() => {});
+    // Fire-and-forget: a mail or push failure must never fail the submission.
+    // Both shapes are caught deliberately — .catch() alone only handles a
+    // REJECTED promise, so a notifier that throws synchronously (before it
+    // returns one) would propagate straight into the requester's response.
+    try {
+      notifyNewAccessRequest({ email, note }).catch(() => {});
+    } catch {
+      // already logged above; the request itself still succeeds
+    }
   }
 
   res.json({ ok: true, duplicate: result.duplicate });

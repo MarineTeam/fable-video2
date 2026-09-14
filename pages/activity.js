@@ -4,6 +4,7 @@ import { auth0 } from '../lib/auth0';
 import { normalizeEmail, trustedEmail } from '../lib/auth';
 import { viewerAccessFor } from '../lib/guard';
 import { CAP } from '../lib/capabilities';
+import { podcastEnabled } from '../lib/podcastStore';
 import { withMonitorPage } from '../lib/monitor';
 import { withSiteName } from '../lib/siteNameStore';
 
@@ -25,6 +26,7 @@ async function gssp({ req, res }) {
         canLookUpOthers: false,
         approved: false,
         unverified: true,
+        podcastOn: false,
       },
     };
   }
@@ -41,14 +43,18 @@ async function gssp({ req, res }) {
       isAdmin: owner || staff,
       canLookUpOthers,
       approved,
+      // Inert until a CDN hostname is configured — without one there are no
+      // enclosure URLs, so the section stays hidden rather than offering a
+      // feed of broken links.
+      podcastOn: podcastEnabled(),
     },
   };
 }
 
 export const getServerSideProps = withMonitorPage(withSiteName(gssp));
 
-async function api(path) {
-  const res = await fetch(path);
+async function api(path, { method = 'GET' } = {}) {
+  const res = await fetch(path, { method });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
@@ -71,8 +77,19 @@ function fmtWhen(iso) {
   return d.toLocaleString();
 }
 
-export default function Activity({ user, isAdmin: admin, canLookUpOthers, approved, unverified, siteName }) {
+export default function Activity({
+  user,
+  isAdmin: admin,
+  canLookUpOthers,
+  approved,
+  unverified,
+  siteName,
+  podcastOn,
+}) {
   const [viewers, setViewers] = useState([]);
+  const [feedToken, setFeedToken] = useState('');
+  const [feedBusy, setFeedBusy] = useState(false);
+  const [feedCopied, setFeedCopied] = useState(false);
   const [selected, setSelected] = useState('__me__');
   const [items, setItems] = useState(null);
   const [error, setError] = useState('');
@@ -83,6 +100,37 @@ export default function Activity({ user, isAdmin: admin, canLookUpOthers, approv
       .then((d) => setViewers(d.viewers || []))
       .catch(() => {});
   }, [canLookUpOthers]);
+
+  useEffect(() => {
+    if (!approved || !podcastOn) return;
+    api('/api/feed-token')
+      .then((d) => setFeedToken(d.token || ''))
+      .catch(() => {});
+  }, [approved, podcastOn]);
+
+  async function regenerateFeed() {
+    if (
+      !window.confirm(
+        'Create a new feed link? The current one stops working immediately, so any podcast app already using it will need the new link.'
+      )
+    ) {
+      return;
+    }
+    setFeedBusy(true);
+    try {
+      const data = await api('/api/feed-token', { method: 'POST' });
+      setFeedToken(data.token || '');
+      setFeedCopied(false);
+    } catch {
+      // leave the existing link on screen; nothing was changed
+    } finally {
+      setFeedBusy(false);
+    }
+  }
+
+  // window is unavailable during SSR, so the URL is assembled client-side only.
+  const origin = typeof window === 'undefined' ? '' : window.location.origin;
+  const feedUrl = feedToken ? `${origin}/api/feed/${feedToken}` : '';
 
   useEffect(() => {
     if (!approved) return;
@@ -144,6 +192,40 @@ export default function Activity({ user, isAdmin: admin, canLookUpOthers, approv
 
       {error ? <p className="error-text">{error}</p> : null}
       {items === null && !error ? <p className="muted">Loading…</p> : null}
+
+      {podcastOn && feedUrl ? (
+        <section className="card card-pad">
+          <h2 className="section-title">Podcast feed</h2>
+          <p className="muted">
+            Add this link to a podcast app to listen to recordings there. It is private to you —
+            anyone you send it to can listen too, so treat it like a password. These are the video
+            files at their smallest size, so they are still a large download over mobile data.
+          </p>
+          <div className="field-row">
+            <input className="input" readOnly value={feedUrl} aria-label="Your private feed link" />
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                navigator.clipboard?.writeText(feedUrl).then(
+                  () => setFeedCopied(true),
+                  () => {}
+                );
+              }}
+            >
+              {feedCopied ? 'Copied' : 'Copy'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              disabled={feedBusy}
+              onClick={regenerateFeed}
+            >
+              {feedBusy ? 'Working…' : 'New link'}
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       {items ? (
         <div className="admin-rows">

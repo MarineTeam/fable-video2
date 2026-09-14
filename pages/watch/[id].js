@@ -9,6 +9,8 @@ import { viewerAccessFor } from '../../lib/guard';
 import { contentScopeFor, isVideoVisible } from '../../lib/groups';
 import { isWithinWindow } from '../../lib/schedule';
 import { getVideoWindow } from '../../lib/scheduleStore';
+import { getVideoChapters } from '../../lib/chaptersStore';
+import { getVideoNotes } from '../../lib/notesStore';
 import { getVideo, signedEmbedUrl } from '../../lib/bunny';
 import { resolveWatermark, isExempt, getVideoMode, getGlobalDefault } from '../../lib/watermark';
 import { isGeoAllowed } from '../../lib/geo';
@@ -76,6 +78,11 @@ async function gssp({ req, res, params }) {
     .hset(k('viewer:lastseen'), { [email]: new Date().toISOString() })
     .catch(() => {});
 
+  // Navigation sugar: a failed read degrades to no chapter list, never to a
+  // broken page (lib/chaptersStore.js already swallows).
+  const chapters = await getVideoChapters(video.guid);
+  const notes = await getVideoNotes(video.guid);
+
   // Best-effort — a watermark hiccup must never block playback (see
   // lib/watermark.js). No share record on a regular watch page, so only the
   // video's own setting and the global default can apply.
@@ -98,13 +105,25 @@ async function gssp({ req, res, params }) {
       embedUrl: signedEmbedUrl(video.guid),
       initialTime,
       watermark,
+      chapters,
+      notes,
     },
   };
 }
 
 export const getServerSideProps = withMonitorPage(withSiteName(gssp));
 
-export default function Watch({ user, isAdmin: admin, video, embedUrl, initialTime, watermark, siteName }) {
+export default function Watch({
+  user,
+  isAdmin: admin,
+  video,
+  embedUrl,
+  initialTime,
+  watermark,
+  siteName,
+  chapters,
+  notes,
+}) {
   return (
     <AppShell siteName={siteName} user={user} isAdmin={admin} approved wide>
       <Link href="/" className="back-link">
@@ -118,7 +137,17 @@ export default function Watch({ user, isAdmin: admin, video, embedUrl, initialTi
         title={video.title}
         watermark={watermark}
         watermarkLabel={user.email}
+        chapters={chapters}
       />
+      {notes ? (
+        <section className="card card-pad video-notes">
+          <h2 className="section-title">Notes</h2>
+          {/* Plain text with line breaks preserved by CSS. React escapes text
+              nodes, so there is no markup to sanitise — which is exactly why
+              the field does not accept markup. */}
+          <p className="notes-body">{notes}</p>
+        </section>
+      ) : null}
     </AppShell>
   );
 }

@@ -3,6 +3,66 @@
 All notable changes to the Marine Video Portal. Dates are UTC, matching the
 commit history (`git log --oneline`).
 
+## 2026-09-13 — Chapters, notes, public videos, podcast feed, request alerts
+
+Five features for a portal whose videos are 60-90 minute service recordings.
+
+- **Chapters** (`lib/chapters.js` + `lib/chaptersStore.js`): timestamps that
+  seek. Parsed from one `24:15 Sermon` per line, sorted by time on save, with
+  unusable lines reported back by line number and reason instead of dropped.
+  The list lives inside ResumablePlayer, which owns the player.js instance, and
+  only becomes clickable once the player reports ready — a player that never
+  loads leaves readable text, not dead buttons.
+- **Notes** (`lib/notes.js` + `lib/notesStore.js`): searchable free text per
+  video. Search is a UNION — Bunny keeps running the title search across the
+  whole library, and note matches are added by id, capped at 25. Replacing the
+  Bunny search with local filtering would have silently regressed search for
+  any library over 100 videos. Access is unaffected: every candidate goes
+  through the same isPlayable -> group scope -> publish window pipeline.
+- **Public videos** (`lib/publicVideos.js`, `lib/publicWatch.js`): a separate
+  `/watch/public/[id]` route, default deny, store fails CLOSED. Publish window
+  and viewer geo whitelist still apply; groups and watermark deliberately do
+  not. No library leak, no progress tracking, signed time-limited embed. The
+  invite-only gates were not touched.
+- **Podcast feed** (`lib/podcast.js` + `lib/podcastStore.js`): per-subscriber
+  token, RSS 2.0 + iTunes, `itunes:block` so it can never be listed. Bunny has
+  NO audio-only rendition, so enclosures are the lowest MP4 rendition and the
+  UI says so. Access re-checked every fetch; removing a viewer revokes the
+  token; every refusal is the same 404 so the route cannot be used to test
+  tokens.
+- **Access-request notifications**: addressed by capability
+  (`emailsWithCapability`), only on a genuinely new request, best-effort in
+  both directions.
+
+Verified rather than assumed:
+
+- Both new unauthenticated surfaces were loaded SIGNED OUT against a dev
+  server. `/watch/public/<guid>` and `/api/feed/<token>` each return 404 from
+  their own code while `/`, `/admin`, `/watch/<guid>` and `/activity` all 307
+  to `/auth/login`. **No `middleware.js` matcher change was needed** and none
+  was made.
+- `lib/bunny.js` gained `signedCdnUrl` for arbitrary CDN paths; the diff is 31
+  insertions and **0 deletions**, so the three signing helpers are byte
+  identical. `thumbnailUrl` was deliberately NOT refactored to share the code.
+  A test re-derives the CDN formula independently with `node:crypto` so drift
+  in either copy fails a test rather than becoming an opaque 403.
+
+Two defects found by the acceptance tests, both fixed:
+
+- The access-request notifier was fired with `.catch()` alone, which only
+  handles a rejected promise. A synchronous throw would have propagated into
+  the requester's response and failed the submission.
+- `normalizeNote` clamped length but did not strip control characters, so C0/C1
+  controls, zero-width joiners and a BOM survived into notification bodies and
+  the audit log.
+
+`ResumablePlayer` gained `trackProgress`, set false on the public route — an
+anonymous visitor has no email to key history against, and without it the
+player would have fired 401s at a guarded endpoint.
+
+New Redis keys: `chapters`, `notes`, `public-videos`, `feed-token:<token>`,
+`feed-token-by-email:<email>`. Suite grew 260 to 352 tests across 23 files.
+
 ## 2026-09-03 — Installed apps pick up a site rename
 
 Follow-up to the entry below, which shipped with a caveat: an already-installed
