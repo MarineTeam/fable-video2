@@ -1,6 +1,6 @@
 import { withMonitorApi } from "../../lib/monitor";
 import { auth0 } from '../../lib/auth0';
-import { trustedEmail } from '../../lib/auth';
+import { normalizeEmail, trustedEmail } from '../../lib/auth';
 import { allowRequest } from '../../lib/ratelimit';
 import { redis, k } from '../../lib/redis';
 import { isShareActive } from '../../lib/share';

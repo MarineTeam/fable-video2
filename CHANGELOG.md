@@ -3,6 +3,44 @@
 All notable changes to the Marine Video Portal. Dates are UTC, matching the
 commit history (`git log --oneline`).
 
+## 2026-09-17 — Security audit fixes
+
+- **`/api/share-event` was returning 500 to every authenticated caller.** The
+  handler called `normalizeEmail` without importing it, so it threw a
+  ReferenceError immediately after the recipient check — share playback
+  analytics (`plays`, `furthestPercent`, `completedAt`) have never recorded.
+  The throw preceded every write, so it failed closed and nothing was
+  mis-authorized. Lint did not catch it because `eslint-config-next` leaves
+  `no-undef` off for plain JS, and `routeGuards.test.js` only exercises the
+  anonymous path, which 401s before reaching the call.
+- **`no-undef` is now an error for `lib/**` and `pages/api/**`**
+  (`eslint.config.mjs`), which is the durable half of that fix. Scoped to
+  server code, whose globals are enumerable; browser code would need the DOM
+  global list. Negative control recorded in the config comment and executed.
+- **Role assignment no longer widens who can watch.** `lib/guard.js` derives
+  viewer approval from holding any capability, so assigning a role also handed
+  the target the private library — the thing `viewers.manage` gates. The
+  subset rule could not see it: the actor really does hold the capability they
+  are passing on. `assignmentNeedsViewerManage` (`lib/capabilities.js`, 6 new
+  tests) now additionally requires `viewers.manage` to give a first role to
+  someone who cannot already see the library. Owners, role removal, and
+  re-assignment to an already-approved user are all unaffected.
+- **Baseline security headers** (`next.config.js`): `X-Frame-Options: DENY` and
+  CSP `frame-ancestors 'none'` — `/admin` has one-click destructive actions and
+  was framable by any origin — plus `nosniff`, `Referrer-Policy:
+  strict-origin-when-cross-origin` (NOT `no-referrer`: Bunny thumbnail hotlink
+  protection reads the Referer) and a `Permissions-Policy`. Deliberately not a
+  full script CSP: the pre-paint theme script and Next's bootstrap are inline
+  and would need nonces. No HSTS — Vercel sets it, and a wrong one is cached by
+  browsers.
+- **`package-lock.json` refreshed**, moving `next` 16.3.0 → 16.3.5 within the
+  existing `^16.3.0` range. The committed lockfile was holding the tree at a
+  release covered by two unauthenticated-RCE advisories
+  (`GHSA-2xp9-vwfh-vxw4`, `GHSA-p293-qw3h-jr36`) plus high-severity `fast-uri`,
+  `js-yaml`, `nanoid` and `sharp` findings. `npm audit`: 7 vulnerabilities
+  (1 critical, 4 high, 2 moderate) → **0**. Neither RCE was reachable here (no
+  `next/image` anywhere, Linux hosting), but the range already allowed the fix.
+
 ## 2026-09-13 — Chapters, notes, public videos, podcast feed, request alerts
 
 Five features for a portal whose videos are 60-90 minute service recordings.
