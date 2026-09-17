@@ -291,7 +291,9 @@ Set `RESEND_API_KEY` and (recommended) `MAIL_FROM` to a Resend-verified sender. 
   capabilities come from assigned roles and **fail closed** to none if they can't be read. Delegation is
   capped by the **no-escalation rule**: an actor may only create, edit, delete or assign a role whose
   capabilities are a subset of their own, so handing someone `roles.manage` lets them pass on what they
-  already hold and nothing more. Every role and assignment change is audit-logged.
+  already hold and nothing more. Holding any capability also grants access to the library itself, so
+  giving someone their *first* role additionally requires `viewers.manage` — `roles.manage` on its own
+  cannot be used to add a viewer. Every role and assignment change is audit-logged.
 - **Playback is always tokenized** — signed, time-limited embed URLs generated per request; no permanent public URL is used or exposed.
 - **Share-link and bundle-page mismatches don't reveal** the intended recipient's email — an expired, revoked, or nonexistent link/bundle all show the same generic message.
 - **Revoking is a soft-delete.** A revoked share link is marked, not deleted — it stays visible in the admin Shares list with a "Revoked" status, and can never be extended back to life. Extend is refused outright on a revoked link. **Un-revoke** reverses this (clears the revoked mark, restores the link's prior expiry, mints no new token) and is a deliberate, separate action from both Extend and Bulk Revoke. A revoked link can additionally be **permanently deleted** — a real, irreversible removal from Redis — but only once it has already been soft-revoked, so the hard delete is always a second, deliberate step on top of the reversible one.

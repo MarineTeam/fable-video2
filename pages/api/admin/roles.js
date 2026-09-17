@@ -1,5 +1,5 @@
 import { withMonitorApi } from '../../../lib/monitor';
-import { requireCapability, resolveActor } from '../../../lib/guard';
+import { requireCapability, resolveActor, viewerAccessFor } from '../../../lib/guard';
 import { allowRequest } from '../../../lib/ratelimit';
 import { logAction } from '../../../lib/audit';
 import { normalizeEmail, isValidEmail } from '../../../lib/auth';
@@ -11,6 +11,7 @@ import {
   roleIdFromName,
   isValidRoleId,
   undelegatableCapabilities,
+  assignmentNeedsViewerManage,
 } from '../../../lib/capabilities';
 import {
   loadRoles,
@@ -123,6 +124,32 @@ async function handler(req, res) {
       const refused = undelegatableCapabilities(actor.capabilities, touched);
       if (refused.length) {
         return res.status(403).json({ error: 'That assignment is outside your own capabilities', refused });
+      }
+      // Assigning a role also grants library access (see
+      // assignmentNeedsViewerManage) — a widening the subset rule above cannot
+      // see. Only resolve the target's current access when the answer could
+      // matter, so the common cases cost no extra reads.
+      const granted = capsOf(requested);
+      if (granted.length && !actor.owner) {
+        let targetApproved = false;
+        try {
+          targetApproved = (await viewerAccessFor(email)).approved;
+        } catch {
+          targetApproved = false; // access decision — fail closed
+        }
+        if (
+          assignmentNeedsViewerManage({
+            owner: actor.owner,
+            actorCaps: actor.capabilities,
+            grantedCaps: granted,
+            targetApproved,
+          })
+        ) {
+          return res.status(403).json({
+            error: 'Granting a role to someone who cannot already view the library needs the viewers.manage capability',
+            refused: [CAP.VIEWERS_MANAGE],
+          });
+        }
       }
       const result = await setRolesForEmail(email, requested, rolesById);
       if (!result.ok) return res.status(400).json({ error: result.error });
