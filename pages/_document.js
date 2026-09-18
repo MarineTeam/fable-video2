@@ -1,6 +1,21 @@
 import { Html, Head, Main, NextScript } from 'next/document';
 import { COLOR_KEYS, DEFAULT_THEME, THEME_STORAGE_KEY } from '../lib/theme';
 
+// Embedding a value in a <script> is not the same as serializing it.
+// JSON.stringify leaves '<' alone, so a value containing '</script>' would
+// close the tag early, and it passes U+2028/U+2029 through, which older
+// parsers read as line terminators inside a string literal. Escaping those
+// three is what makes the output safe to paste into code - CodeQL flags the
+// bare JSON.stringify as improper sanitization (js/bad-code-sanitization),
+// and it is right to: the values below are constants we control today, but
+// the call site is what has to stay safe, not whatever flows through it.
+function jsLiteral(value) {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003C')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
 // Applies the cached palette before first paint so returning visitors never
 // see a color flash.
 //
@@ -16,9 +31,9 @@ import { COLOR_KEYS, DEFAULT_THEME, THEME_STORAGE_KEY } from '../lib/theme';
 // The variable list is derived from COLOR_KEYS rather than spelled out, so a
 // new colour cannot be added to the theme and silently skip this check;
 // themeCssVars() maps every key to '--' + key.
-const noFlash = `try{var h=/^#[0-9a-fA-F]{6}$/,k=${JSON.stringify(
+const noFlash = `try{var h=/^#[0-9a-fA-F]{6}$/,k=${jsLiteral(
   COLOR_KEYS
-)},t=JSON.parse(localStorage.getItem(${JSON.stringify(
+)},t=JSON.parse(localStorage.getItem(${jsLiteral(
   THEME_STORAGE_KEY
 )})||"null");if(t&&t.colors&&k.every(function(n){return h.test(t.colors[n])})){var s=document.documentElement.style;k.forEach(function(n){s.setProperty("--"+n,t.colors[n])})}}catch(e){}`;
 
