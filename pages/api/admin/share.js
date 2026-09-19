@@ -3,6 +3,7 @@ import { requireCapability } from '../../../lib/guard';
 import { CAP } from '../../../lib/capabilities';
 import { allowRequest } from '../../../lib/ratelimit';
 import { normalizeEmail, isValidEmail } from '../../../lib/auth';
+import { oneTrimmed } from '../../../lib/params';
 import { getVideo } from '../../../lib/bunny';
 import { logAction } from '../../../lib/audit';
 import { createShare, clampHours, baseUrl, resendShareEmail } from '../../../lib/share';
@@ -20,7 +21,8 @@ async function handler(req, res) {
 
   // Re-deliver an existing link's own email to its original recipient.
   if (req.body?.resend) {
-    const id = String(req.body.resend);
+    const id = oneTrimmed(req.body.resend);
+    if (!id) return res.status(400).json({ error: 'Bad share id' });
     const result = await resendShareEmail(id, baseUrl(req));
     if (result.error) return res.status(404).json({ error: result.error });
     await logAction(admin, 'share.resend', id.slice(0, 8) + '…');
@@ -30,7 +32,8 @@ async function handler(req, res) {
   // Extend expiry in place — same token/URL, no new link. From now, not from
   // the stale old expiry; refused outright on a revoked item.
   if (req.body?.extend) {
-    const id = String(req.body.extend);
+    const id = oneTrimmed(req.body.extend);
+    if (!id) return res.status(400).json({ error: 'Bad share id' });
     const result = await extendShareAndBundle(id, req.body.hours);
     if (!result.ok) return res.status(409).json({ error: result.error });
     await logAction(admin, 'share.extend', id.slice(0, 8) + '…');

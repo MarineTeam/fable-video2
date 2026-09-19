@@ -4,6 +4,7 @@ import { CAP } from '../../../lib/capabilities';
 import { logAction } from '../../../lib/audit';
 import { isValidVideoGuid } from '../../../lib/publicVideos';
 import { setVideoPublic } from '../../../lib/publicVideosStore';
+import { isExplicitlyTrue, oneTrimmed } from '../../../lib/params';
 
 // Opens or closes a video's public door. videos.manage — the same capability
 // as deleting a video, because making one world-readable is at least as
@@ -16,10 +17,10 @@ async function handler(req, res) {
   if (!admin) return;
 
   if (req.method === 'POST') {
-    const guid = String(req.body?.guid || '');
+    const guid = oneTrimmed(req.body?.guid) || '';
     if (!isValidVideoGuid(guid)) return res.status(400).json({ error: 'Bad video id' });
     // Only an explicit true opens the door; anything else closes it.
-    const isPublic = req.body?.isPublic === true;
+    const isPublic = isExplicitlyTrue(req.body?.isPublic);
     try {
       const result = await setVideoPublic(guid, isPublic);
       if (!result.ok) return res.status(400).json({ error: result.error });

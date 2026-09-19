@@ -5,6 +5,7 @@ import { redis, k } from '../../../lib/redis';
 import { getVideo } from '../../../lib/bunny';
 import { logAction } from '../../../lib/audit';
 import { shareStatus, revokeShare, unrevokeShare, purgeShare, loadShares } from '../../../lib/share';
+import { oneTrimmed } from '../../../lib/params';
 
 async function handler(req, res) {
   const admin = await requireCapability(req, res, req.method === 'GET' ? CAP.SHARES_READ : CAP.SHARES_MANAGE);
@@ -53,7 +54,7 @@ async function handler(req, res) {
   }
 
   if (req.method === 'DELETE') {
-    const id = String(req.query.id || req.body?.id || '');
+    const id = oneTrimmed(req.query.id) || oneTrimmed(req.body?.id);
     if (!id) return res.status(400).json({ error: 'Bad id' });
     const permanent = req.query.permanent === '1' || req.body?.permanent === true;
     try {
@@ -75,7 +76,7 @@ async function handler(req, res) {
   // Un-revoke: a deliberate, separate action from Extend and Bulk Revoke —
   // restores the link with its pre-revoke expiresAt untouched, no new token.
   if (req.method === 'PUT') {
-    const id = String(req.body?.id || '');
+    const id = oneTrimmed(req.body?.id);
     if (!id) return res.status(400).json({ error: 'Bad id' });
     try {
       const result = await unrevokeShare(id);

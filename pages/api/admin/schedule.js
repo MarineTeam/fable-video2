@@ -4,6 +4,7 @@ import { CAP } from '../../../lib/capabilities';
 import { logAction } from '../../../lib/audit';
 import { normalizeWindow } from '../../../lib/schedule';
 import { setVideoWindow } from '../../../lib/scheduleStore';
+import { oneTrimmed } from '../../../lib/params';
 
 // Sets a video's publish window. videos.manage — the same capability as
 // renaming or deleting a video. Reading windows is not here on purpose: they
@@ -14,7 +15,7 @@ async function handler(req, res) {
   if (!admin) return;
 
   if (req.method === 'POST') {
-    const guid = String(req.body?.guid || '');
+    const guid = oneTrimmed(req.body?.guid) || '';
     if (!/^[0-9a-f-]{10,64}$/i.test(guid)) return res.status(400).json({ error: 'Bad video id' });
     const window = normalizeWindow({ from: req.body?.from, until: req.body?.until });
     if (window?.invalid) {

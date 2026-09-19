@@ -4,6 +4,7 @@ import { CAP } from '../../../lib/capabilities';
 import { logAction } from '../../../lib/audit';
 import { parseChapters } from '../../../lib/chapters';
 import { setVideoChapters } from '../../../lib/chaptersStore';
+import { oneNumber, oneTrimmed } from '../../../lib/params';
 
 // Sets a video's chapter list. videos.manage — the same capability as renaming
 // a video. Reading chapters is not here on purpose: they ship with the video
@@ -17,9 +18,9 @@ async function handler(req, res) {
   if (!admin) return;
 
   if (req.method === 'POST') {
-    const guid = String(req.body?.guid || '');
+    const guid = oneTrimmed(req.body?.guid) || '';
     if (!/^[0-9a-f-]{10,64}$/i.test(guid)) return res.status(400).json({ error: 'Bad video id' });
-    const durationSeconds = Number(req.body?.durationSeconds) || 0;
+    const durationSeconds = oneNumber(req.body?.durationSeconds, 0);
     const { chapters, ignored } = parseChapters(req.body?.text, { durationSeconds });
     try {
       await setVideoChapters(guid, chapters);
