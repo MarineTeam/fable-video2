@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { formatTimestamp } from '../lib/chapters';
+import TranscriptPanel from './TranscriptPanel';
 
 function postShareEvent(shareId, payload) {
   fetch('/api/share-event', {
@@ -25,6 +26,11 @@ export default function ResumablePlayer({
   watermarkLabel = '',
   chapters = [],
   trackProgress = true,
+  // OFF by default: pages/watch/public/[id].js renders this same player for
+  // signed-out visitors, and /api/transcript/[id] requires an approved
+  // viewer — so a public page would fire a request that can only 404 and
+  // then tell the visitor the video is 'not transcribed', which is false.
+  showTranscript = false,
 }) {
   const iframeRef = useRef(null);
   // The player instance lives here so the chapter list below can seek it, and
@@ -162,6 +168,9 @@ export default function ResumablePlayer({
             ))}
           </ol>
         </div>
+      ) : null}
+      {showTranscript ? (
+        <TranscriptPanel videoId={videoId} seekable={canSeek} onSeek={seekTo} />
       ) : null}
     </>
   );

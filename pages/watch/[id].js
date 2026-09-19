@@ -138,6 +138,7 @@ export default function Watch({
         watermark={watermark}
         watermarkLabel={user.email}
         chapters={chapters}
+        showTranscript
       />
       {notes ? (
         <section className="card card-pad video-notes">

@@ -260,6 +260,7 @@ function VideosTab({
   const [chaptersDraft, setChaptersDraft] = useState('');
   const [chaptersStatus, setChaptersStatus] = useState('');
   const [chaptersIgnored, setChaptersIgnored] = useState([]);
+  const [transcribeStatus, setTranscribeStatus] = useState({}); // guid -> message
   const [publicStatus, setPublicStatus] = useState('');
   const [scheduleDraft, setScheduleDraft] = useState({ from: '', until: '' });
   const [scheduleError, setScheduleError] = useState('');
@@ -440,6 +441,28 @@ function VideosTab({
       reloadVideos();
     } catch (err) {
       setNotesStatus(err.message);
+    }
+  }
+
+  // Transcription. TWO steps, not one, because bunny's Transcribe AI is
+  // asynchronous: queueing returns immediately and the captions land minutes
+  // later. Hiding that behind a poller would hide the timing and the cost
+  // from the person who pressed the button.
+  async function transcribe(guid, ingest) {
+    setTranscribeStatus((prev) => ({ ...prev, [guid]: ingest ? 'Fetching…' : 'Queueing…' }));
+    try {
+      const result = await api('/api/admin/transcribe', {
+        method: 'POST',
+        body: { guid, ...(ingest ? { ingest: true } : {}) },
+      });
+      const message = result?.queued
+        ? 'Queued — bunny takes a few minutes, then press Fetch captions.'
+        : result?.ready
+          ? `Fetched ${result.cues} lines (${result.language}).`
+          : 'Not ready yet — give it a minute, then press Fetch captions.';
+      setTranscribeStatus((prev) => ({ ...prev, [guid]: message }));
+    } catch (err) {
+      setTranscribeStatus((prev) => ({ ...prev, [guid]: err?.message || 'That did not work.' }));
     }
   }
 
@@ -998,6 +1021,32 @@ function VideosTab({
                     Cancel
                   </button>
                   {chaptersStatus ? <span className="muted">{chaptersStatus}</span> : null}
+                </div>
+                <h3 className="section-title">Transcript</h3>
+                <p className="muted">
+                  bunny.net transcribes the audio, then viewers get a searchable transcript
+                  under the player and the library can be searched by what was said. Costs
+                  about <strong>$0.10 per minute</strong> of video, charged by bunny — so
+                  the price is here rather than on an invoice later.
+                </p>
+                <div className="field-row">
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => transcribe(v.guid, false)}
+                  >
+                    Transcribe
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => transcribe(v.guid, true)}
+                  >
+                    Fetch captions
+                  </button>
+                  {transcribeStatus[v.guid] ? (
+                    <span className="muted">{transcribeStatus[v.guid]}</span>
+                  ) : null}
                 </div>
               </div>
             ) : null}
