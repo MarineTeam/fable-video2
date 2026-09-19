@@ -3,6 +3,7 @@ import { requireCapability } from '../../../lib/guard';
 import { CAP } from '../../../lib/capabilities';
 import { listCollections, createCollection, deleteCollection } from '../../../lib/bunny';
 import { logAction } from '../../../lib/audit';
+import { oneTrimmed } from '../../../lib/params';
 
 async function handler(req, res) {
   const admin = await requireCapability(req, res, req.method === 'GET' ? CAP.VIDEOS_READ : CAP.VIDEOS_MANAGE);
@@ -24,7 +25,7 @@ async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    const name = String(req.body?.name || '').trim().slice(0, 100);
+    const name = (oneTrimmed(req.body?.name) || '').slice(0, 100);
     if (!name) return res.status(400).json({ error: 'Bad name' });
     try {
       const created = await createCollection(name);
@@ -36,7 +37,7 @@ async function handler(req, res) {
   }
 
   if (req.method === 'DELETE') {
-    const id = String(req.query.id || req.body?.id || '');
+    const id = oneTrimmed(req.query.id) || oneTrimmed(req.body?.id);
     if (!id) return res.status(400).json({ error: 'Bad id' });
     try {
       await deleteCollection(id);
