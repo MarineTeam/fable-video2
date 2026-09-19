@@ -38,6 +38,15 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
   the whole library, and videos whose notes match are added by id (capped per search). Every candidate goes through the same
   access pipeline, so a note match can never surface a video a viewer may not see. Rendered as plain text with line breaks
   preserved — no markup is accepted, which is why none needs sanitising.
+- **Transcript** _(admin, Videos tab → viewers, under the player)_ — bunny.net transcribes the audio and viewers get the
+  spoken text under the player, collapsed by default. Every line carries the timestamp it was said at and clicking one seeks
+  there — a chapter at the resolution of a sentence. A search box inside the panel filters to matching lines, and the
+  **library search matches what was said**, joining the same union as notes above and obeying the same cap and the same
+  access pipeline, so a transcript match can never surface a video a viewer may not see. **Transcribing costs money**
+  (bunny bills about $0.10 per minute of video), so the price is printed on the admin control. Two clicks, not one, because
+  bunny's transcription is asynchronous: *Transcribe* queues it, *Fetch captions* pulls the result in a few minutes later.
+  A video that was never transcribed shows no panel at all, and the public watch page never shows one — its visitors are
+  signed out, and the transcript endpoint requires an approved viewer.
 - **Public (unlisted) videos** _(admin, Videos tab)_ — share one talk with someone who has no account. Default deny: a video
   is public only when explicitly marked, and the store fails **closed**. Served from a separate `/watch/public/[id]` route
   rather than by relaxing the invite-only ones, so the entire anonymous surface is one file to audit. The publish window and
@@ -183,4 +192,6 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 ## Known gaps / not yet implemented
 - **`email_verified` enforcement is opt-in** — implemented and tested, but off unless `REQUIRE_EMAIL_VERIFIED=1`, because no code can prove a given Auth0 tenant emits the claim. Confirm on a preview, then turn it on.
 - **Owner list is still env-frozen** — capability-based staff are managed live in `/admin` → Roles, but the owner set itself (`ADMIN_EMAILS`) is deliberately env-only: an admin-writable owner list is a bigger prize than an env var, and keeping it out of Redis is what makes self-lockout and privilege escalation structurally impossible rather than merely guarded against.
-- **Captions/transcripts, comments/ratings** — not implemented.
+- **Comments/ratings** — not implemented.
+- **Transcripts are one language, and the admin fetches them by hand** — bunny can translate captions into 56 languages, but only one track is ingested (English when present, otherwise the first bunny produced). Transcription is asynchronous with no webhook wired up, so “Transcribe” and “Fetch captions” are two clicks minutes apart.
+- **AI chapters are not accepted automatically** — bunny can generate chapters from the transcript and the transcribe call deliberately turns that off. Chapters here are admin-authored (`lib/chapters.js`); a second writer for the same field is how hand-written ones get silently replaced.

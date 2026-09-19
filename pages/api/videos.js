@@ -9,10 +9,13 @@ import { filterVideosBySchedule } from '../../lib/schedule';
 import { loadSchedule } from '../../lib/scheduleStore';
 import { matchingNoteGuids } from '../../lib/notes';
 import { loadAllNotes } from '../../lib/notesStore';
+import { matchingTranscriptGuids } from '../../lib/captions';
+import { loadAllTranscriptText } from '../../lib/captionsStore';
 
 const PAGE_SIZE = 10;
 
-// Cap on how many note-only matches are pulled in by guid on a single search.
+// Cap on how many note- or transcript-only matches are pulled in by guid on a
+// single search.
 // Each one is a Bunny round trip, and a search that matched a hundred notes
 // would be useless to read anyway.
 const MAX_NOTE_MATCHES = 25;
@@ -63,8 +66,21 @@ async function handler(req, res) {
     let candidates = found;
     if (search) {
       const seen = new Set(found.map((v) => v.guid));
-      const extraGuids = matchingNoteGuids(await loadAllNotes(), search)
+      // Notes AND transcripts, as one union. A transcript match is the same
+      // shape of claim as a note match — "this video is about that" — so it
+      // joins the same list and obeys the same cap, rather than getting its
+      // own budget of Bunny round trips.
+      const [notesByGuid, transcriptText] = await Promise.all([
+        loadAllNotes(),
+        loadAllTranscriptText(),
+      ]);
+      const matched = new Set([
+        ...matchingNoteGuids(notesByGuid, search),
+        ...matchingTranscriptGuids(transcriptText, search),
+      ]);
+      const extraGuids = [...matched]
         .filter((guid) => !seen.has(guid))
+        .sort()
         .slice(0, MAX_NOTE_MATCHES);
       if (extraGuids.length) {
         const fetched = await Promise.all(
