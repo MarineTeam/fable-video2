@@ -20,7 +20,8 @@ import { PRESETS, COLOR_KEYS, applyTheme, validateTheme, THEME_STORAGE_KEY } fro
 import { rollupSharesByVideo } from '../lib/videoAnalytics';
 import { windowState } from '../lib/schedule';
 import { DEFAULT_SITE_NAME, MAX_SITE_NAME_LENGTH } from '../lib/siteName';
-import { chaptersToText } from '../lib/chapters';
+import { chaptersToText, parseChapters } from '../lib/chapters';
+import { sameChapters } from '../lib/aiChapters';
 import { MAX_NOTES_LENGTH } from '../lib/notes';
 import { isGeoAllowed } from '../lib/geo';
 import { withMonitorPage } from '../lib/monitor';
@@ -261,6 +262,10 @@ function VideosTab({
   const [chaptersStatus, setChaptersStatus] = useState('');
   const [chaptersIgnored, setChaptersIgnored] = useState([]);
   const [transcribeStatus, setTranscribeStatus] = useState({}); // guid -> message
+  // Opt-in and unticked by default: chapter suggestions ride along with the
+  // same transcription job at no extra charge, but a video whose chapters are
+  // already typed has no use for them. Nothing they produce is ever saved.
+  const [wantChapters, setWantChapters] = useState(false);
   const [publicStatus, setPublicStatus] = useState('');
   const [scheduleDraft, setScheduleDraft] = useState({ from: '', until: '' });
   const [scheduleError, setScheduleError] = useState('');
@@ -453,10 +458,12 @@ function VideosTab({
     try {
       const result = await api('/api/admin/transcribe', {
         method: 'POST',
-        body: { guid, ...(ingest ? { ingest: true } : {}) },
+        body: { guid, ...(ingest ? { ingest: true } : { chapters: wantChapters }) },
       });
       const message = result?.queued
-        ? 'Queued — bunny takes a few minutes, then press Fetch captions.'
+        ? result.chapters
+          ? 'Queued with chapter suggestions — a few minutes, then Fetch captions and Suggest chapters.'
+          : 'Queued — bunny takes a few minutes, then press Fetch captions.'
         : result?.ready
           ? `Fetched ${result.cues} lines (${result.language}).`
           : 'Not ready yet — give it a minute, then press Fetch captions.';
@@ -469,8 +476,55 @@ function VideosTab({
   function openChapters(guid, current) {
     setChaptersStatus('');
     setChaptersIgnored([]);
+    setWantChapters(false);
     setChaptersFor(chaptersFor === guid ? null : guid);
     setChaptersDraft(chaptersToText(current || []));
+  }
+
+  // Loads bunny's generated chapters INTO THE TEXTAREA. This is the accept
+  // step and it is deliberately only half of one: the suggestions sit in the
+  // box until the admin presses Save chapters, so what gets stored is still
+  // something a person chose. Replacing text they typed asks first — the AI is
+  // not allowed to overwrite someone's work on one click.
+  async function suggestChapters(guid, durationSeconds) {
+    setChaptersStatus('Reading…');
+    setChaptersIgnored([]);
+    try {
+      const data = await api('/api/admin/transcribe', {
+        method: 'POST',
+        body: { guid, suggestions: true },
+      });
+      const proposed = data?.chapters || [];
+      const skipped = data?.ignored || [];
+      if (!proposed.length) {
+        setChaptersStatus(
+          skipped.length
+            ? `bunny returned ${skipped.length} chapter(s) that could not be read.`
+            : 'bunny has not generated chapters for this video. Transcribe again with the box ticked.'
+        );
+        return;
+      }
+      const current = parseChapters(chaptersDraft, { durationSeconds }).chapters;
+      if (sameChapters(current, proposed)) {
+        setChaptersStatus('The suggestions match what is already here.');
+        return;
+      }
+      if (
+        chaptersDraft.trim() &&
+        !window.confirm(
+          `Replace the ${current.length} chapter(s) in the box with ${proposed.length} suggested one(s)? Nothing is saved until you press Save chapters.`
+        )
+      ) {
+        setChaptersStatus('');
+        return;
+      }
+      setChaptersDraft(chaptersToText(proposed));
+      setChaptersStatus(
+        `Loaded ${proposed.length} suggestion(s)${skipped.length ? `, skipped ${skipped.length}` : ''} — edit, then press Save chapters.`
+      );
+    } catch (err) {
+      setChaptersStatus(err?.message || 'Could not read the suggestions.');
+    }
   }
 
   async function saveChapters(guid, durationSeconds) {
@@ -1016,6 +1070,14 @@ function VideosTab({
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
+                    onClick={() => suggestChapters(v.guid, v.length || 0)}
+                    title="Load bunny's suggested chapters into the box above — nothing is saved for you"
+                  >
+                    Suggest chapters
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
                     onClick={() => setChaptersFor(null)}
                   >
                     Cancel
@@ -1048,6 +1110,18 @@ function VideosTab({
                     <span className="muted">{transcribeStatus[v.guid]}</span>
                   ) : null}
                 </div>
+                <label className="field-row">
+                  <input
+                    type="checkbox"
+                    checked={wantChapters}
+                    onChange={(e) => setWantChapters(e.target.checked)}
+                  />
+                  <span className="muted">
+                    Also suggest chapters from the transcript. Suggestions are never saved
+                    for you — press <strong>Suggest chapters</strong> above to load them
+                    into the box, then save.
+                  </span>
+                </label>
               </div>
             ) : null}
             {scheduleFor === v.guid ? (
