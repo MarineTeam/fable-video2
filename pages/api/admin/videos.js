@@ -12,6 +12,7 @@ import { applyOrder } from '../../../lib/order';
 import { loadSchedule, clearVideoWindow } from '../../../lib/scheduleStore';
 import { loadAllChapters, clearVideoChapters } from '../../../lib/chaptersStore';
 import { loadAllNotes, clearVideoNotes } from '../../../lib/notesStore';
+import { clearVideoTranscript } from '../../../lib/captionsStore';
 import { loadPublicVideoGuids, clearVideoPublic } from '../../../lib/publicVideosStore';
 import { announceNewVideos } from '../../../lib/push';
 import { logAction } from '../../../lib/audit';
@@ -105,6 +106,9 @@ async function handler(req, res) {
       await clearVideoWindow(id);
       await clearVideoChapters(id);
       await clearVideoNotes(id);
+      // Third per-video decoration, cleared with the other two — a transcript
+      // that outlives its video is a row nothing will ever collect.
+      await clearVideoTranscript(id);
       await clearVideoPublic(id);
       await logAction(admin, 'video.delete', id);
       return res.json({ ok: true });
