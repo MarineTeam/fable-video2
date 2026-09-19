@@ -38,6 +38,12 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
   the whole library, and videos whose notes match are added by id (capped per search). Every candidate goes through the same
   access pipeline, so a note match can never surface a video a viewer may not see. Rendered as plain text with line breaks
   preserved — no markup is accepted, which is why none needs sanitising.
+- **My list** _(viewers)_ — save a video to come back to. A toggle beside the title on the watch page, and a "My list" row at
+  the top of the library, newest saved first. Distinct from continue-watching and shown above it: this is what you **chose**,
+  that is what you happened to **start**, so a saved video you never opened appears here and nowhere else. Saving is gated
+  exactly like watching — you cannot save a video your groups or its publish window hide, and one that later leaves your
+  access simply stops matching rather than sitting in the row unopenable. Capped at 200, refused politely at the cap rather
+  than dropping the oldest silently.
 - **Transcript** _(admin, Videos tab → viewers, under the player)_ — bunny.net transcribes the audio and viewers get the
   spoken text under the player, collapsed by default. Every line carries the timestamp it was said at and clicking one seeks
   there — a chapter at the resolution of a sentence. A search box inside the panel filters to matching lines, and the

@@ -16,6 +16,9 @@ import { resolveWatermark, isExempt, getVideoMode, getGlobalDefault } from '../.
 import { isGeoAllowed } from '../../lib/geo';
 import { withMonitorPage } from '../../lib/monitor';
 import { withSiteName } from '../../lib/siteNameStore';
+import SaveToListButton from '../../components/SaveToListButton';
+import { getMyList } from '../../lib/mylistStore';
+import { isSaved } from '../../lib/mylist';
 
 async function gssp({ req, res, params }) {
   const id = String(params.id || '');
@@ -82,6 +85,10 @@ async function gssp({ req, res, params }) {
   // broken page (lib/chaptersStore.js already swallows).
   const chapters = await getVideoChapters(video.guid);
   const notes = await getVideoNotes(video.guid);
+  // Read server-side so the toggle never paints 'Save' on a video already
+  // saved. getMyList already swallows read failures into {}, so an unreadable
+  // list starts it unsaved — which one click corrects.
+  const saved = isSaved(await getMyList(email), video.guid);
 
   // Best-effort — a watermark hiccup must never block playback (see
   // lib/watermark.js). No share record on a regular watch page, so only the
@@ -107,6 +114,7 @@ async function gssp({ req, res, params }) {
       watermark,
       chapters,
       notes,
+      saved,
     },
   };
 }
@@ -123,13 +131,17 @@ export default function Watch({
   siteName,
   chapters,
   notes,
+  saved,
 }) {
   return (
     <AppShell siteName={siteName} user={user} isAdmin={admin} approved wide>
       <Link href="/" className="back-link">
         <ChevronLeftIcon /> Library
       </Link>
-      <h1 className="watch-title">{video.title}</h1>
+      <div className="watch-head">
+        <h1 className="watch-title">{video.title}</h1>
+        <SaveToListButton guid={video.guid} initialSaved={saved} />
+      </div>
       <ResumablePlayer
         embedUrl={embedUrl}
         videoId={video.guid}

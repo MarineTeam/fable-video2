@@ -70,6 +70,7 @@ export default function Home({ user, isAdmin: admin, approved, geoBlocked, unver
   const [pages, setPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [savedIds, setSavedIds] = useState([]);
   const [queryInput, setQueryInput] = useState('');
   const [query, setQuery] = useState('');
   const [collections, setCollections] = useState([]);
@@ -99,6 +100,22 @@ export default function Home({ user, isAdmin: admin, approved, geoBlocked, unver
       setRequestState('idle');
     }
   }
+
+  // Saved ids only — the page already holds the library it is allowed to see,
+  // so intersecting locally means a saved video that has since left the
+  // viewer's scope simply matches nothing rather than needing filtering here.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/mylist')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled) setSavedIds(d?.ids || []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Debounced search.
   useEffect(() => {
@@ -223,6 +240,26 @@ export default function Home({ user, isAdmin: admin, approved, geoBlocked, unver
 
   return (
     <AppShell siteName={siteName} user={user} isAdmin={admin} approved>
+      {savedIds.length > 0 && !query && !activeCollection && page === 1 ? (
+        <section className="cw-section">
+          <h2 className="section-title">My list</h2>
+          <div className="cw-strip">
+            {/* Saved order, not library order, and no progress line: most
+                saved videos have never been opened, and an empty track reads
+                as "0% watched" rather than "not started". */}
+            {savedIds
+              .map((id) => videos.find((v) => v.guid === id))
+              .filter(Boolean)
+              .slice(0, 8)
+              .map((v) => (
+                <Link key={v.guid} href={`/watch/${v.guid}`} className="cw-card card">
+                  <span className="cw-title">{v.title || 'Untitled'}</span>
+                </Link>
+              ))}
+          </div>
+        </section>
+      ) : null}
+
       {continueWatching.length > 0 && !query && !activeCollection && page === 1 ? (
         <section className="cw-section">
           <h2 className="section-title">Continue watching</h2>
