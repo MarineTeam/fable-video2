@@ -14,6 +14,8 @@ import { loadAllChapters, clearVideoChapters } from '../../../lib/chaptersStore'
 import { loadAllNotes, clearVideoNotes } from '../../../lib/notesStore';
 import { clearVideoTranscript } from '../../../lib/captionsStore';
 import { loadPublicVideoGuids, clearVideoPublic } from '../../../lib/publicVideosStore';
+import { clearVideoRatingCounts, getRatingCounts } from '../../../lib/ratingsStore';
+import { countsByVideo, countsFor, summarize } from '../../../lib/ratings';
 import { announceNewVideos } from '../../../lib/push';
 import { logAction } from '../../../lib/audit';
 import { getVideoModes, setVideoMode, clampWatermarkMode } from '../../../lib/watermark';
@@ -40,6 +42,9 @@ async function handler(req, res) {
       const chapters = await loadAllChapters();
       const notes = await loadAllNotes();
       const publicGuids = await loadPublicVideoGuids();
+      // Totals only — the counters hold no identity, so this cannot tell an
+      // admin WHO rated anything. See lib/ratings.js.
+      const ratings = countsByVideo(await getRatingCounts());
       return res.json({
         videos: ordered.map((v) => ({
           guid: v.guid,
@@ -56,6 +61,9 @@ async function handler(req, res) {
           chapters: chapters[v.guid] || [],
           notes: notes[v.guid] || '',
           isPublic: publicGuids.has(v.guid),
+          // null when nobody has voted, so the UI shows nothing rather than a
+          // row of zeroes that reads like a bad score.
+          rating: summarize(countsFor(ratings, v.guid)),
         })),
       });
     } catch {
@@ -110,6 +118,8 @@ async function handler(req, res) {
       // that outlives its video is a row nothing will ever collect.
       await clearVideoTranscript(id);
       await clearVideoPublic(id);
+      // A recycled bunny.net guid must not inherit another video's score.
+      await clearVideoRatingCounts(id);
       await logAction(admin, 'video.delete', id);
       return res.json({ ok: true });
     } catch {

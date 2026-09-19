@@ -953,6 +953,16 @@ function VideosTab({
               Chapters
               {v.chapters?.length ? <span className="tab-badge">{v.chapters.length}</span> : null}
             </button>
+            {/* Totals only, and staff-only. The counters hold no identities,
+                so this cannot say who rated what — see lib/ratings.js. */}
+            {v.rating ? (
+              <span
+                className="muted"
+                title={`${v.rating.up} up, ${v.rating.down} down, from ${v.rating.total} viewer(s)`}
+              >
+                👍 {v.rating.up} · 👎 {v.rating.down}
+              </span>
+            ) : null}
             <button
               type="button"
               className="btn btn-ghost btn-sm"

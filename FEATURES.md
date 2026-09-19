@@ -53,6 +53,13 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
   bunny's transcription is asynchronous: *Transcribe* queues it, *Fetch captions* pulls the result in a few minutes later.
   A video that was never transcribed shows no panel at all, and the public watch page never shows one — its visitors are
   signed out, and the transcript endpoint requires an approved viewer.
+- **Rate a video** _(viewer, watch page)_ — 👍 or 👎 beside the title; pressing the vote you already hold clears it, which is
+  the only way to take one back. **A viewer sees their own vote and nobody else's** — the totals go to staff, on the admin
+  Videos tab, never to viewers. In a library watched by a few dozen people a visible "2 down" on someone's teaching is a
+  social problem the product does not need, and at that size a public counter is close to attributable anyway. The vote is
+  stored under the viewer's own key (`ratings:{email}`), so removing a viewer removes their votes with them; the totals are
+  plain integers holding no address at all. Rating obeys group scope and the publish window exactly as watching does, and
+  answers 404 rather than 403, so it cannot be used to find out which guids exist.
 - **Suggested chapters** _(admin, Videos tab)_ — optionally the same transcription job asks bunny to propose chapters (a
   tick-box on the transcribe control, off by default, no extra charge). The proposal is only ever a proposal: *Suggest
   chapters* loads it **into the chapters box** to edit and save, and replacing text already there asks first. Nothing on
@@ -206,4 +213,6 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - **Owner list is still env-frozen** — capability-based staff are managed live in `/admin` → Roles, but the owner set itself (`ADMIN_EMAILS`) is deliberately env-only: an admin-writable owner list is a bigger prize than an env var, and keeping it out of Redis is what makes self-lockout and privilege escalation structurally impossible rather than merely guarded against.
 - **Comments/ratings** — not implemented.
 - **Transcripts are one language, and the admin fetches them by hand** — bunny can translate captions into 56 languages, but only one track is ingested (English when present, otherwise the first bunny produced). Transcription is asynchronous with no webhook wired up, so “Transcribe” and “Fetch captions” are two clicks minutes apart.
+- **Comments are not implemented** — ratings are (above), but there is no free-text discussion anywhere in the portal. That is a deliberate stop: text other viewers can read needs moderation, reporting and a notion of who may delete whose words, none of which exists here.
+- **Rating totals can drift by one against the votes** — a vote and its counter are two writes, not one. The vote is authoritative and written first; the counter is incremented after, best-effort, so an Upstash blip between them leaves the total one short. It is never *corrected*, because recomputing it would mean scanning every viewer's ratings hash, which this repo does not do anywhere. Totals are read as approximate; a negative one is clamped to zero rather than shown. The votes themselves are exact.
 - **AI chapters are suggestions, and staying that way is the design** — bunny can generate chapters from the transcript, but nothing on that path writes to the stored list: suggestions are read back read-only (`lib/aiChapters.js`) and land in the admin's textarea, where a person accepts them. A background write would be a second writer for the same field, which is how hand-written chapters get silently replaced. **The field names bunny returns (`title`/`start`) come from its docs, not from a live job** — this has never run against a real transcription, so the reader accepts a few spellings and reports what it could not read rather than returning an empty list.
