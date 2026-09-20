@@ -5,7 +5,8 @@ import { contentScopeFor, isVideoVisible } from '../../../lib/groups';
 import { isWithinWindow } from '../../../lib/schedule';
 import { getVideoWindow } from '../../../lib/scheduleStore';
 import { getVideo } from '../../../lib/bunny';
-import { getVideoTranscript } from '../../../lib/captionsStore';
+import { getVideoTranscript, getTranscriptLanguages } from '../../../lib/captionsStore';
+import { languageMissing, pickLanguage } from '../../../lib/captions';
 
 // One video's transcript, for the watch page.
 //
@@ -63,7 +64,18 @@ async function handler(req, res) {
   // An empty transcript is a normal answer, not an error: most videos have
   // never been transcribed, and the panel renders nothing for them.
   // getVideoTranscript already swallows read failures into [].
-  return res.json({ cues: await getVideoTranscript(video.guid) });
+  const { default: fallback, all } = await getTranscriptLanguages(video.guid);
+  const requested = oneTrimmed(req.query.lang);
+  const language = pickLanguage(all, requested, fallback);
+  // `missing` is reported rather than papered over: a viewer who picked
+  // Spanish and is shown English would conclude the translation is WRONG,
+  // which is worse than being told there isn't one.
+  return res.json({
+    cues: await getVideoTranscript(video.guid, language),
+    language,
+    languages: all,
+    missing: languageMissing(all, requested),
+  });
 }
 
 export default withMonitorApi(handler);

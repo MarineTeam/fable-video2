@@ -48,6 +48,9 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - **Transcript** _(admin, Videos tab → viewers, under the player)_ — bunny.net transcribes the audio and viewers get the
   spoken text under the player, collapsed by default. Every line carries the timestamp it was said at and clicking one seeks
   there — a chapter at the resolution of a sentence. A search box inside the panel filters to matching lines, and the
+  **every language bunny produced is kept**, with a picker in the panel when there is more than one — translation is billed
+  per language, so ingesting only one would mean paying for tracks nobody could read, and a language the video does not have
+  is reported rather than quietly answered with another. The
   **library search matches what was said**, joining the same union as notes above and obeying the same cap and the same
   access pipeline, so a transcript match can never surface a video a viewer may not see. **Transcribing costs money**
   (bunny bills about $0.10 per minute of video), so the price is printed on the admin control. Two clicks, not one, because
@@ -219,7 +222,7 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - **`email_verified` enforcement is opt-in** — implemented and tested, but off unless `REQUIRE_EMAIL_VERIFIED=1`, because no code can prove a given Auth0 tenant emits the claim. Confirm on a preview, then turn it on.
 - **Owner list is still env-frozen** — capability-based staff are managed live in `/admin` → Roles, but the owner set itself (`ADMIN_EMAILS`) is deliberately env-only: an admin-writable owner list is a bigger prize than an env var, and keeping it out of Redis is what makes self-lockout and privilege escalation structurally impossible rather than merely guarded against.
 - **Comments/ratings** — not implemented.
-- **Transcripts are one language** — bunny can translate captions into 56 languages, but only one track is ingested (English when present, otherwise the first bunny produced). There is no language picker.
+- **Library search reads ONE language per video** — the default track, the one ingested first. Indexing every translation of the same sermon would multiply the search payload to return the same video, so searching in Spanish for a talk whose default is English finds nothing. The panel still offers every language once the video is open.
 - **Collection rides on an admin visiting the Videos tab** — there is no webhook and no background worker, so a finished transcription is collected the next time an admin loads that list. If nobody opens it for a day the marker expires and the transcript has to be fetched with the button. A deliberate trade: no new infrastructure, bounded work per request, and the manual button still there.
 - **Group membership needs both capabilities** — naming or changing who is in a group requires `viewers.read` on top of `groups.manage`, because membership is people data: the member addresses, the whole `email → [groupId]` map, and even the per-address refusal ("not an approved viewer") are the approved viewer list by another name. A groups-only manager keeps the registry, the scopes and a member **count**.
 - **A cut search says so** — two caps shorten a search: 25 note/transcript matches pulled in by id, then the admin's homepage count. Both are now reported rather than quietly returning a shorter list, because a viewer whose sermon was match 26 otherwise saw a search that confidently did not contain it. The count is only claimed when it is **exact**: matches dropped at the union cap were never fetched, so whether they would have survived the group and schedule filters is genuinely unknown, and the notice says "and there are more" rather than inventing a number.
