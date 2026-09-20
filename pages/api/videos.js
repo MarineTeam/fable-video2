@@ -18,6 +18,13 @@ const PAGE_SIZE = 10;
 // single search.
 // Each one is a Bunny round trip, and a search that matched a hundred notes
 // would be useless to read anyway.
+//
+// BOTH CAPS ON THIS PATH ARE NOW REPORTED. This one drops note/transcript
+// matches beyond 25, and `homeCount` drops results beyond the admin's page
+// size; until this was surfaced, a search simply returned fewer videos with
+// nothing to say it had stopped early, and `total` described the CAPPED list
+// as though it were the whole truth. A viewer whose sermon was match 26 saw a
+// search that confidently did not contain it.
 const MAX_NOTE_MATCHES = 25;
 
 async function handler(req, res) {
@@ -64,6 +71,9 @@ async function handler(req, res) {
     const found = (data?.items || []).filter(isPlayable);
 
     let candidates = found;
+    // How many note/transcript matches were found but never fetched. Nonzero
+    // means the answer below is incomplete in a way only this line knows.
+    let unionDropped = 0;
     if (search) {
       const seen = new Set(found.map((v) => v.guid));
       // Notes AND transcripts, as one union. A transcript match is the same
@@ -78,10 +88,11 @@ async function handler(req, res) {
         ...matchingNoteGuids(notesByGuid, search),
         ...matchingTranscriptGuids(transcriptText, search),
       ]);
-      const extraGuids = [...matched]
-        .filter((guid) => !seen.has(guid))
-        .sort()
-        .slice(0, MAX_NOTE_MATCHES);
+      const eligible = [...matched].filter((guid) => !seen.has(guid)).sort();
+      // Recorded before the slice: once they are gone there is nothing left
+      // to notice they were dropped.
+      unionDropped = Math.max(0, eligible.length - MAX_NOTE_MATCHES);
+      const extraGuids = eligible.slice(0, MAX_NOTE_MATCHES);
       if (extraGuids.length) {
         const fetched = await Promise.all(
           // A video whose note record outlived the video itself simply drops
@@ -101,7 +112,8 @@ async function handler(req, res) {
       filterVideosByScope(candidates, scope),
       schedule
     );
-    const capped = applyOrder(playable, order).slice(0, homeCount);
+    const ordered = applyOrder(playable, order);
+    const capped = ordered.slice(0, homeCount);
 
     const start = (page - 1) * PAGE_SIZE;
     const videos = capped.slice(start, start + PAGE_SIZE).map((v) => ({
@@ -116,6 +128,16 @@ async function handler(req, res) {
       total: capped.length,
       page,
       pages: Math.max(1, Math.ceil(capped.length / PAGE_SIZE)),
+      // Only meaningful while SEARCHING. On the unfiltered view `homeCount` is
+      // the admin's display choice doing exactly what it is for, and calling
+      // that "truncated" would put a warning on every ordinary page load.
+      truncated: Boolean(search) && (ordered.length > homeCount || unionDropped > 0),
+      // What matched, before the display cap. EXACT only when the note union
+      // was not cut: the matches dropped there were never fetched, so whether
+      // they would have survived the scope and schedule filters is unknown,
+      // and claiming a precise total would be inventing one.
+      matched: ordered.length,
+      matchedExact: unionDropped === 0,
     });
   } catch {
     res.status(502).json({ error: 'Video service unavailable' });

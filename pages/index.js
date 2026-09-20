@@ -68,6 +68,10 @@ export default function Home({ user, isAdmin: admin, approved, geoBlocked, unver
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
+  // Whether the search stopped early, and what it saw before the cap. See
+  // pages/api/videos.js — both caps on that path are reported rather than
+  // silently shortening the answer.
+  const [cut, setCut] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [savedIds, setSavedIds] = useState([]);
@@ -140,6 +144,11 @@ export default function Home({ user, isAdmin: admin, approved, geoBlocked, unver
       setVideos(data.videos || []);
       setTotal(data.total || 0);
       setPages(data.pages || 1);
+      setCut(
+        data.truncated
+          ? { shown: data.total || 0, matched: data.matched || 0, exact: data.matchedExact !== false }
+          : null
+      );
     } catch {
       setError('Could not load the library. Try again in a moment.');
     } finally {
@@ -279,6 +288,19 @@ export default function Home({ user, isAdmin: admin, approved, geoBlocked, unver
             ))}
           </div>
         </section>
+      ) : null}
+
+      {/* Said plainly rather than shown as a shorter list: a viewer whose
+          sermon was match 26 would otherwise see a search that confidently
+          did not contain it. The count is only claimed when it is exact —
+          when the note/transcript union was cut, the dropped matches were
+          never fetched, so their number is genuinely unknown. */}
+      {cut ? (
+        <div className="notice">
+          {cut.exact
+            ? `Showing the first ${cut.shown} of ${cut.matched} matches — narrow the search to see the rest.`
+            : `Showing the first ${cut.shown} matches, and there are more — narrow the search to see them.`}
+        </div>
       ) : null}
 
       <div className="library-head">
