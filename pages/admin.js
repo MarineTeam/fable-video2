@@ -3322,11 +3322,16 @@ function GroupsTab({ viewers, videos, collections }) {
   const [newName, setNewName] = useState('');
   const [editing, setEditing] = useState(null);
   const [busy, setBusy] = useState(false);
+  // Membership is a separate capability from managing the group registry
+  // (see pages/api/admin/groups.js). The server decides; this only hides an
+  // editor that would 403 anyway, and a member list it did not send.
+  const [canEditMembers, setCanEditMembers] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const data = await api('/api/admin/groups');
       setGroups(data.groups || []);
+      setCanEditMembers(Boolean(data.canEditMembers));
       setGating(data.gating || { enabled: false, defaultAccess: 'open' });
     } catch (err) {
       setStatus(err.message);
@@ -3366,10 +3371,24 @@ function GroupsTab({ viewers, videos, collections }) {
           videoIds: [...editing.videoIds],
         },
       });
-      await api('/api/admin/groups', {
-        method: 'PATCH',
-        body: { action: 'set-members', groupId: editing.id, emails: [...editing.members] },
-      });
+      // Membership is a separate capability (see pages/api/admin/groups.js).
+      // Without it the scope edit above still saves; only the member list is
+      // left alone, rather than the whole save failing on a 403.
+      if (canEditMembers) {
+        const result = await api('/api/admin/groups', {
+          method: 'PATCH',
+          body: { action: 'set-members', groupId: editing.id, emails: [...editing.members] },
+        });
+        // Refusals are shown, never swallowed: an address that is not an
+        // approved viewer is silently absent otherwise, and an admin can
+        // believe somebody is in a group for months.
+        const notes = [];
+        if (result?.unknown?.length) {
+          notes.push(`not approved viewers: ${result.unknown.join(', ')}`);
+        }
+        if (result?.invalid?.length) notes.push(`not valid addresses: ${result.invalid.join(', ')}`);
+        setStatus(notes.join(' · '));
+      }
       setEditing(null);
       load();
     } catch (err) {
@@ -3380,7 +3399,11 @@ function GroupsTab({ viewers, videos, collections }) {
   }
 
   async function remove(group) {
-    if (!window.confirm(`Delete the group "${group.name}"? Its ${group.members.length} members keep their access.`)) {
+    if (
+      !window.confirm(
+        `Delete the group "${group.name}"? Its ${group.memberCount} members keep their access.`
+      )
+    ) {
       return;
     }
     try {
@@ -3474,19 +3497,23 @@ function GroupsTab({ viewers, videos, collections }) {
                   <div className="row-main">
                     <span className="row-title">{group.name}</span>
                     <span className="row-meta muted">
-                      {group.members.length} {group.members.length === 1 ? 'member' : 'members'} ·{' '}
+                      {group.memberCount} {group.memberCount === 1 ? 'member' : 'members'} ·{' '}
                       {group.collectionIds.length} collections · {group.videoIds.length} videos
                     </span>
-                    <div className="chips">
-                      {group.members.slice(0, 8).map((email) => (
-                        <span key={email} className="chip">
-                          {email}
-                        </span>
-                      ))}
-                      {group.members.length > 8 ? (
-                        <span className="muted">+{group.members.length - 8} more</span>
-                      ) : null}
-                    </div>
+                    {/* Addresses only for a caller who may read the viewer
+                        list; everyone else sees the count above. */}
+                    {group.members ? (
+                      <div className="chips">
+                        {group.members.slice(0, 8).map((email) => (
+                          <span key={email} className="chip">
+                            {email}
+                          </span>
+                        ))}
+                        {group.members.length > 8 ? (
+                          <span className="muted">+{group.members.length - 8} more</span>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                   <div className="row-meta">
                     <button
@@ -3496,7 +3523,7 @@ function GroupsTab({ viewers, videos, collections }) {
                         setEditing({
                           id: group.id,
                           name: group.name,
-                          members: new Set(group.members),
+                          members: new Set(group.members || []),
                           collectionIds: new Set(group.collectionIds),
                           videoIds: new Set(group.videoIds),
                         })
@@ -3521,23 +3548,31 @@ function GroupsTab({ viewers, videos, collections }) {
                     aria-label="Group name"
                   />
 
-                  <div className="field-block">
-                    <span className="muted">Members</span>
-                    {viewers.length === 0 ? (
-                      <p className="muted">No approved viewers yet.</p>
-                    ) : (
-                      viewers.map((v) => (
-                        <label key={v.email} className="field-row">
-                          <input
-                            type="checkbox"
-                            checked={editing.members.has(v.email)}
-                            onChange={() => toggleInEditing('members', v.email)}
-                          />
-                          <span>{v.email}</span>
-                        </label>
-                      ))
-                    )}
-                  </div>
+                  {canEditMembers ? (
+                    <div className="field-block">
+                      <span className="muted">Members</span>
+                      {viewers.length === 0 ? (
+                        <p className="muted">No approved viewers yet.</p>
+                      ) : (
+                        viewers.map((v) => (
+                          <label key={v.email} className="field-row">
+                            <input
+                              type="checkbox"
+                              checked={editing.members.has(v.email)}
+                              onChange={() => toggleInEditing('members', v.email)}
+                            />
+                            <span>{v.email}</span>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                  ) : (
+                    <p className="muted">
+                      Membership needs the &ldquo;view the approved viewer list&rdquo;
+                      capability as well as group management — it names people. The
+                      group&rsquo;s name and content scope are still yours to edit.
+                    </p>
+                  )}
 
                   <div className="field-block">
                     <span className="muted">Collections this group can see</span>

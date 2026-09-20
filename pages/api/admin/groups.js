@@ -1,9 +1,9 @@
 import { withMonitorApi } from '../../../lib/monitor';
-import { requireCapability } from '../../../lib/guard';
+import { requireCapability, resolveActor } from '../../../lib/guard';
 import { allowRequest } from '../../../lib/ratelimit';
 import { logAction } from '../../../lib/audit';
 import { normalizeEmail, isValidEmail } from '../../../lib/auth';
-import { CAP } from '../../../lib/capabilities';
+import { CAP, hasCapability } from '../../../lib/capabilities';
 import { redis, k } from '../../../lib/redis';
 import {
   loadGroups,
@@ -27,12 +27,37 @@ import {
 // see is a separate, deployment-level decision (GROUP_CONTENT_GATING) — this
 // route reports it via `gating` so the UI can say plainly whether scopes are
 // live or just recorded.
+//
+// MEMBERSHIP IS PEOPLE DATA, so it needs CAP.VIEWERS_READ on top of the
+// groups.manage this route is gated on. Until this check existed, a delegated
+// groups.manage holder received every group's member addresses AND the whole
+// email -> [groupId] map from GET — the approved viewer list by another name,
+// from a capability whose label only promises groups. The same applies to the
+// membership actions on PATCH: their per-address answer ('not an approved
+// viewer') is that list again, one address at a time.
+//
+// Writing membership needs nothing beyond groups.manage, deliberately: that
+// holder can already change what every member of a group sees by editing the
+// group's scope or deleting it. What membership adds is visibility of PEOPLE,
+// and that is exactly what the viewers.read requirement covers. Managing the
+// group registry and its scopes is unaffected — a groups-only manager keeps
+// every power they had except naming and changing who is in a group.
 async function handler(req, res) {
   const admin = await requireCapability(req, res, CAP.GROUPS_MANAGE);
   if (!admin) return;
   if (req.method !== 'GET' && !(await allowRequest('groups', admin, 20, 60))) {
     return res.status(429).json({ error: 'Too many requests' });
   }
+
+  // Decided once, used by GET and by the membership actions below.
+  //
+  // requireCapability returns the EMAIL (so call sites can pass it straight to
+  // logAction), not the resolved actor, so the capability list has to be asked
+  // for again. Owners hold the whole catalog by definition and are checked the
+  // same way requireCapability checks them — reading only `capabilities` would
+  // lock an owner out of the member list they are entitled to.
+  const actor = await resolveActor(admin);
+  const maySeePeople = actor.owner || hasCapability(actor.capabilities, CAP.VIEWERS_READ);
 
   if (req.method === 'GET') {
     try {
@@ -41,13 +66,19 @@ async function handler(req, res) {
         loadGroupMemberships(),
         groupDefaultAccess(),
       ]);
-      const groups = sortedGroups(groupsById).map((g) => ({
-        ...g,
-        members: membersOfGroup(memberships, g.id),
-      }));
+      const groups = sortedGroups(groupsById).map((g) => {
+        const members = membersOfGroup(memberships, g.id);
+        // A COUNT is not people data; the addresses are. A groups-only
+        // manager still sees how big a group is, which is what the scope
+        // editor actually needs.
+        return maySeePeople
+          ? { ...g, members, memberCount: members.length }
+          : { ...g, memberCount: members.length };
+      });
       return res.json({
         groups,
-        memberships,
+        ...(maySeePeople ? { memberships } : {}),
+        canEditMembers: maySeePeople,
         gating: { enabled: groupGatingEnabled(), defaultAccess },
       });
     } catch {
@@ -107,6 +138,10 @@ async function handler(req, res) {
     // Two membership shapes: per-group (the Groups tab) and per-user (the
     // Viewers tab). Both land in the same email -> [groupId] hash.
     const action = String(req.body?.action || '');
+    // Both membership shapes name people; the default-access toggle does not.
+    if ((action === 'set-members' || action === 'set-groups') && !maySeePeople) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
     try {
       if (action === 'set-members') {
         const groupId = String(req.body?.groupId || '');
@@ -114,11 +149,23 @@ async function handler(req, res) {
         const groupsById = await loadGroups();
         if (!groupsById[groupId]) return res.status(404).json({ error: 'No such group' });
         const emails = Array.isArray(req.body?.emails) ? req.body.emails.map(String) : [];
-        const result = await setMembersOfGroup(groupId, emails);
+        // Only approved viewers may be put in a group — the rule
+        // lib/viewerTags.js has always applied to tagging, and membership is
+        // the same claim about the same person. A read failure passes null,
+        // which means 'could not check' and leaves today's behaviour rather
+        // than emptying a group because Redis blinked.
+        let approved = null;
+        try {
+          approved = new Set((await redis().smembers(k('viewers'))) || []);
+        } catch {
+          approved = null;
+        }
+        const result = await setMembersOfGroup(groupId, emails, { approved });
         await logAction(
           admin,
           'group.members',
-          `${groupsById[groupId].name} · ${result.members.length} members`
+          `${groupsById[groupId].name} · ${result.members.length} members` +
+            (result.unknown.length ? ` (${result.unknown.length} not approved)` : '')
         );
         return res.json(result);
       }
