@@ -54,6 +54,12 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
   bunny's transcription is asynchronous — but **one click, not two**: queueing records the video, and the admin Videos tab collects whatever bunny has finished since. *Fetch captions* still works for anyone who wants it now. Before this, forgetting the second click left a video that had really been transcribed and paid for, with no transcript and nothing saying why.
   A video that was never transcribed shows no panel at all, and the public watch page never shows one — its visitors are
   signed out, and the transcript endpoint requires an approved viewer.
+- **Link to a moment** _(viewer, watch page)_ — a *Copy link at 24:15* button under the player copies the page address with the
+  current position on it, and opening a link with `?t=` starts there. An explicit timestamp **beats the saved resume
+  position**: the viewer followed a link to a point, and sending them where they last stopped would quietly ignore what they
+  clicked. A value that is not a timestamp is ignored rather than read as 0:00, so a mangled link leaves resume alone instead
+  of dropping them at the start. Reads plain seconds, `1:30`, `1:02:03` and `1h2m3s`. Works on the share and public watch
+  pages too, since the button copies whatever address the player is already on.
 - **Rate a video** _(viewer, watch page)_ — 👍 or 👎 beside the title; pressing the vote you already hold clears it, which is
   the only way to take one back. **A viewer sees their own vote and nobody else's** — the totals go to staff, on the admin
   Videos tab, never to viewers. In a library watched by a few dozen people a visible "2 down" on someone's teaching is a

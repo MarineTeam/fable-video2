@@ -22,8 +22,9 @@ import { getMyList } from '../../lib/mylistStore';
 import { isSaved } from '../../lib/mylist';
 import { getRatings } from '../../lib/ratingsStore';
 import { ratingOf } from '../../lib/ratings';
+import { parseTimeParam } from '../../lib/timestampLink';
 
-async function gssp({ req, res, params }) {
+async function gssp({ req, res, params, query }) {
   const id = String(params.id || '');
   if (!/^[0-9a-f-]{10,64}$/i.test(id)) return { notFound: true };
 
@@ -80,6 +81,15 @@ async function gssp({ req, res, params }) {
     }
   } catch {}
 
+  // A ?t= in the address is an explicit request for a moment, so it beats the
+  // saved resume position — the viewer followed a link to a point, and
+  // sending them to where they last stopped would ignore what they clicked.
+  // Null (not 0) when it cannot be read, so a mangled link leaves resume
+  // alone rather than silently restarting the video.
+  const requested = parseTimeParam(query?.t);
+  const startExplicit = requested !== null;
+  if (startExplicit) initialTime = requested;
+
   redis()
     .hset(k('viewer:lastseen'), { [email]: new Date().toISOString() })
     .catch(() => {});
@@ -118,6 +128,7 @@ async function gssp({ req, res, params }) {
       // Signed fresh on every request — never a permanent URL.
       embedUrl: signedEmbedUrl(video.guid),
       initialTime,
+      startExplicit,
       watermark,
       chapters,
       notes,
@@ -135,6 +146,7 @@ export default function Watch({
   video,
   embedUrl,
   initialTime,
+  startExplicit,
   watermark,
   siteName,
   chapters,
@@ -156,6 +168,7 @@ export default function Watch({
         embedUrl={embedUrl}
         videoId={video.guid}
         initialTime={initialTime}
+        startExplicit={startExplicit}
         title={video.title}
         watermark={watermark}
         watermarkLabel={user.email}

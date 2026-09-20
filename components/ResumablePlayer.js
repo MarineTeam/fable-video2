@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { formatTimestamp } from '../lib/chapters';
+import { linkAtTime } from '../lib/timestampLink';
 import TranscriptPanel from './TranscriptPanel';
 
 function postShareEvent(shareId, payload) {
@@ -20,6 +21,11 @@ export default function ResumablePlayer({
   embedUrl,
   videoId,
   initialTime = 0,
+  // True when initialTime came from a ?t= in the address rather than from the
+  // saved resume position. It changes the seek rule below: a resume under
+  // five seconds is not worth restoring, but a link to 0:03 is exactly what
+  // the viewer asked for.
+  startExplicit = false,
   title = '',
   shareId = '',
   watermark = false,
@@ -39,6 +45,9 @@ export default function ResumablePlayer({
   // nothing. A broken player must never produce a broken-looking list.
   const playerRef = useRef(null);
   const [canSeek, setCanSeek] = useState(false);
+  // Where playback is now, for the copy-link button.
+  const [position, setPosition] = useState(0);
+  const [copied, setCopied] = useState(false);
   const lastSentRef = useRef(0);
   const playedRef = useRef(false);
   const furthestRef = useRef(0);
@@ -56,7 +65,7 @@ export default function ResumablePlayer({
         playerRef.current = player;
         player.on('ready', () => {
           setCanSeek(true);
-          if (initialTime > 5) {
+          if (startExplicit ? initialTime >= 0 : initialTime > 5) {
             try {
               player.setCurrentTime(initialTime);
             } catch {}
@@ -74,6 +83,9 @@ export default function ResumablePlayer({
             });
           }
           player.on('timeupdate', ({ seconds, duration }) => {
+            // Tracked even when trackProgress is off: the copy-link button is
+            // useful on the public watch page too, and this costs nothing.
+            setPosition(Math.floor(seconds || 0));
             // The public watch page passes trackProgress={false}: an anonymous
             // visitor has no email to key history against, so reporting would
             // only fire 401s at a guarded endpoint.
@@ -118,7 +130,21 @@ export default function ResumablePlayer({
         }
       } catch {}
     };
-  }, [embedUrl, videoId, initialTime, title, shareId, trackProgress]);
+  }, [embedUrl, videoId, initialTime, startExplicit, title, shareId, trackProgress]);
+
+  // Copies the address of this moment. Uses the CURRENT page URL rather than
+  // rebuilding one, so it works from the regular watch page, a share page and
+  // the public page alike without this component knowing their shapes.
+  async function copyMoment() {
+    try {
+      await navigator.clipboard.writeText(linkAtTime(window.location.href, position));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard refused (insecure context, or permission). Leaving the
+      // button as it was beats pretending it worked.
+    }
+  }
 
   function seekTo(seconds) {
     const player = playerRef.current;
@@ -147,6 +173,16 @@ export default function ResumablePlayer({
         </div>
       ) : null}
       </div>
+      {/* Only once player.js is talking to us: a button that copied 0:00 for
+          every video would be worse than no button, and this matches how the
+          chapter list already degrades. */}
+      {canSeek ? (
+        <div className="field-row">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={copyMoment}>
+            {copied ? 'Link copied' : `Copy link at ${formatTimestamp(position)}`}
+          </button>
+        </div>
+      ) : null}
       {chapters.length > 0 ? (
         <div className="chapter-list card card-pad">
           <h2 className="section-title">Chapters</h2>
