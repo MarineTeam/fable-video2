@@ -17,6 +17,7 @@ import { loadPublicVideoGuids, clearVideoPublic } from '../../../lib/publicVideo
 import { clearVideoRatingCounts, getRatingCounts } from '../../../lib/ratingsStore';
 import { countsByVideo, countsFor, summarize } from '../../../lib/ratings';
 import { announceNewVideos } from '../../../lib/push';
+import { collectFinishedTranscripts } from '../../../lib/transcriptCollect';
 import { logAction } from '../../../lib/audit';
 import { getVideoModes, setVideoMode, clampWatermarkMode } from '../../../lib/watermark';
 
@@ -31,6 +32,18 @@ async function handler(req, res) {
       const items = data?.items || [];
       // Announce freshly finished uploads (atomic once-only guard inside).
       await announceNewVideos(items).catch(() => {});
+      // Best-effort, same contract: collect any transcription bunny has
+      // finished since it was queued, so the admin does not have to remember a
+      // second click minutes later. Bounded per request by
+      // lib/transcribeQueue.js; failures are retried next load and age out.
+      const { collected } = await collectFinishedTranscripts().catch(() => ({ collected: [] }));
+      for (const item of collected) {
+        await logAction(
+          admin,
+          'video.transcript_ingest',
+          `${item.guid} (${item.language}, ${item.cues}, collected automatically)`
+        ).catch(() => {});
+      }
       const orderRaw = await r.get(k('order')).catch(() => null);
       const ordered = applyOrder(items, Array.isArray(orderRaw) ? orderRaw : []);
       const watermarkModes = await getVideoModes(ordered.map((v) => v.guid));
