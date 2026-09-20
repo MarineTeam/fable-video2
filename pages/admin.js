@@ -20,7 +20,8 @@ import { PRESETS, COLOR_KEYS, applyTheme, validateTheme, THEME_STORAGE_KEY } fro
 import { rollupSharesByVideo } from '../lib/videoAnalytics';
 import { windowState } from '../lib/schedule';
 import { DEFAULT_SITE_NAME, MAX_SITE_NAME_LENGTH } from '../lib/siteName';
-import { chaptersToText } from '../lib/chapters';
+import { chaptersToText, parseChapters } from '../lib/chapters';
+import { sameChapters } from '../lib/aiChapters';
 import { MAX_NOTES_LENGTH } from '../lib/notes';
 import { isGeoAllowed } from '../lib/geo';
 import { withMonitorPage } from '../lib/monitor';
@@ -260,6 +261,11 @@ function VideosTab({
   const [chaptersDraft, setChaptersDraft] = useState('');
   const [chaptersStatus, setChaptersStatus] = useState('');
   const [chaptersIgnored, setChaptersIgnored] = useState([]);
+  const [transcribeStatus, setTranscribeStatus] = useState({}); // guid -> message
+  // Opt-in and unticked by default: chapter suggestions ride along with the
+  // same transcription job at no extra charge, but a video whose chapters are
+  // already typed has no use for them. Nothing they produce is ever saved.
+  const [wantChapters, setWantChapters] = useState(false);
   const [publicStatus, setPublicStatus] = useState('');
   const [scheduleDraft, setScheduleDraft] = useState({ from: '', until: '' });
   const [scheduleError, setScheduleError] = useState('');
@@ -443,11 +449,82 @@ function VideosTab({
     }
   }
 
+  // Transcription. TWO steps, not one, because bunny's Transcribe AI is
+  // asynchronous: queueing returns immediately and the captions land minutes
+  // later. Hiding that behind a poller would hide the timing and the cost
+  // from the person who pressed the button.
+  async function transcribe(guid, ingest) {
+    setTranscribeStatus((prev) => ({ ...prev, [guid]: ingest ? 'Fetching…' : 'Queueing…' }));
+    try {
+      const result = await api('/api/admin/transcribe', {
+        method: 'POST',
+        body: { guid, ...(ingest ? { ingest: true } : { chapters: wantChapters }) },
+      });
+      const message = result?.queued
+        ? result.chapters
+          ? 'Queued with chapter suggestions — a few minutes, then Fetch captions and Suggest chapters.'
+          : 'Queued — bunny takes a few minutes, then press Fetch captions.'
+        : result?.ready
+          ? `Fetched ${result.cues} lines (${result.language}).`
+          : 'Not ready yet — give it a minute, then press Fetch captions.';
+      setTranscribeStatus((prev) => ({ ...prev, [guid]: message }));
+    } catch (err) {
+      setTranscribeStatus((prev) => ({ ...prev, [guid]: err?.message || 'That did not work.' }));
+    }
+  }
+
   function openChapters(guid, current) {
     setChaptersStatus('');
     setChaptersIgnored([]);
+    setWantChapters(false);
     setChaptersFor(chaptersFor === guid ? null : guid);
     setChaptersDraft(chaptersToText(current || []));
+  }
+
+  // Loads bunny's generated chapters INTO THE TEXTAREA. This is the accept
+  // step and it is deliberately only half of one: the suggestions sit in the
+  // box until the admin presses Save chapters, so what gets stored is still
+  // something a person chose. Replacing text they typed asks first — the AI is
+  // not allowed to overwrite someone's work on one click.
+  async function suggestChapters(guid, durationSeconds) {
+    setChaptersStatus('Reading…');
+    setChaptersIgnored([]);
+    try {
+      const data = await api('/api/admin/transcribe', {
+        method: 'POST',
+        body: { guid, suggestions: true },
+      });
+      const proposed = data?.chapters || [];
+      const skipped = data?.ignored || [];
+      if (!proposed.length) {
+        setChaptersStatus(
+          skipped.length
+            ? `bunny returned ${skipped.length} chapter(s) that could not be read.`
+            : 'bunny has not generated chapters for this video. Transcribe again with the box ticked.'
+        );
+        return;
+      }
+      const current = parseChapters(chaptersDraft, { durationSeconds }).chapters;
+      if (sameChapters(current, proposed)) {
+        setChaptersStatus('The suggestions match what is already here.');
+        return;
+      }
+      if (
+        chaptersDraft.trim() &&
+        !window.confirm(
+          `Replace the ${current.length} chapter(s) in the box with ${proposed.length} suggested one(s)? Nothing is saved until you press Save chapters.`
+        )
+      ) {
+        setChaptersStatus('');
+        return;
+      }
+      setChaptersDraft(chaptersToText(proposed));
+      setChaptersStatus(
+        `Loaded ${proposed.length} suggestion(s)${skipped.length ? `, skipped ${skipped.length}` : ''} — edit, then press Save chapters.`
+      );
+    } catch (err) {
+      setChaptersStatus(err?.message || 'Could not read the suggestions.');
+    }
   }
 
   async function saveChapters(guid, durationSeconds) {
@@ -876,6 +953,16 @@ function VideosTab({
               Chapters
               {v.chapters?.length ? <span className="tab-badge">{v.chapters.length}</span> : null}
             </button>
+            {/* Totals only, and staff-only. The counters hold no identities,
+                so this cannot say who rated what — see lib/ratings.js. */}
+            {v.rating ? (
+              <span
+                className="muted"
+                title={`${v.rating.up} up, ${v.rating.down} down, from ${v.rating.total} viewer(s)`}
+              >
+                👍 {v.rating.up} · 👎 {v.rating.down}
+              </span>
+            ) : null}
             <button
               type="button"
               className="btn btn-ghost btn-sm"
@@ -993,12 +1080,58 @@ function VideosTab({
                   <button
                     type="button"
                     className="btn btn-ghost btn-sm"
+                    onClick={() => suggestChapters(v.guid, v.length || 0)}
+                    title="Load bunny's suggested chapters into the box above — nothing is saved for you"
+                  >
+                    Suggest chapters
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
                     onClick={() => setChaptersFor(null)}
                   >
                     Cancel
                   </button>
                   {chaptersStatus ? <span className="muted">{chaptersStatus}</span> : null}
                 </div>
+                <h3 className="section-title">Transcript</h3>
+                <p className="muted">
+                  bunny.net transcribes the audio, then viewers get a searchable transcript
+                  under the player and the library can be searched by what was said. Costs
+                  about <strong>$0.10 per minute</strong> of video, charged by bunny — so
+                  the price is here rather than on an invoice later.
+                </p>
+                <div className="field-row">
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => transcribe(v.guid, false)}
+                  >
+                    Transcribe
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => transcribe(v.guid, true)}
+                  >
+                    Fetch captions
+                  </button>
+                  {transcribeStatus[v.guid] ? (
+                    <span className="muted">{transcribeStatus[v.guid]}</span>
+                  ) : null}
+                </div>
+                <label className="field-row">
+                  <input
+                    type="checkbox"
+                    checked={wantChapters}
+                    onChange={(e) => setWantChapters(e.target.checked)}
+                  />
+                  <span className="muted">
+                    Also suggest chapters from the transcript. Suggestions are never saved
+                    for you — press <strong>Suggest chapters</strong> above to load them
+                    into the box, then save.
+                  </span>
+                </label>
               </div>
             ) : null}
             {scheduleFor === v.guid ? (
@@ -3189,11 +3322,16 @@ function GroupsTab({ viewers, videos, collections }) {
   const [newName, setNewName] = useState('');
   const [editing, setEditing] = useState(null);
   const [busy, setBusy] = useState(false);
+  // Membership is a separate capability from managing the group registry
+  // (see pages/api/admin/groups.js). The server decides; this only hides an
+  // editor that would 403 anyway, and a member list it did not send.
+  const [canEditMembers, setCanEditMembers] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const data = await api('/api/admin/groups');
       setGroups(data.groups || []);
+      setCanEditMembers(Boolean(data.canEditMembers));
       setGating(data.gating || { enabled: false, defaultAccess: 'open' });
     } catch (err) {
       setStatus(err.message);
@@ -3233,10 +3371,24 @@ function GroupsTab({ viewers, videos, collections }) {
           videoIds: [...editing.videoIds],
         },
       });
-      await api('/api/admin/groups', {
-        method: 'PATCH',
-        body: { action: 'set-members', groupId: editing.id, emails: [...editing.members] },
-      });
+      // Membership is a separate capability (see pages/api/admin/groups.js).
+      // Without it the scope edit above still saves; only the member list is
+      // left alone, rather than the whole save failing on a 403.
+      if (canEditMembers) {
+        const result = await api('/api/admin/groups', {
+          method: 'PATCH',
+          body: { action: 'set-members', groupId: editing.id, emails: [...editing.members] },
+        });
+        // Refusals are shown, never swallowed: an address that is not an
+        // approved viewer is silently absent otherwise, and an admin can
+        // believe somebody is in a group for months.
+        const notes = [];
+        if (result?.unknown?.length) {
+          notes.push(`not approved viewers: ${result.unknown.join(', ')}`);
+        }
+        if (result?.invalid?.length) notes.push(`not valid addresses: ${result.invalid.join(', ')}`);
+        setStatus(notes.join(' · '));
+      }
       setEditing(null);
       load();
     } catch (err) {
@@ -3247,7 +3399,11 @@ function GroupsTab({ viewers, videos, collections }) {
   }
 
   async function remove(group) {
-    if (!window.confirm(`Delete the group "${group.name}"? Its ${group.members.length} members keep their access.`)) {
+    if (
+      !window.confirm(
+        `Delete the group "${group.name}"? Its ${group.memberCount} members keep their access.`
+      )
+    ) {
       return;
     }
     try {
@@ -3341,19 +3497,23 @@ function GroupsTab({ viewers, videos, collections }) {
                   <div className="row-main">
                     <span className="row-title">{group.name}</span>
                     <span className="row-meta muted">
-                      {group.members.length} {group.members.length === 1 ? 'member' : 'members'} ·{' '}
+                      {group.memberCount} {group.memberCount === 1 ? 'member' : 'members'} ·{' '}
                       {group.collectionIds.length} collections · {group.videoIds.length} videos
                     </span>
-                    <div className="chips">
-                      {group.members.slice(0, 8).map((email) => (
-                        <span key={email} className="chip">
-                          {email}
-                        </span>
-                      ))}
-                      {group.members.length > 8 ? (
-                        <span className="muted">+{group.members.length - 8} more</span>
-                      ) : null}
-                    </div>
+                    {/* Addresses only for a caller who may read the viewer
+                        list; everyone else sees the count above. */}
+                    {group.members ? (
+                      <div className="chips">
+                        {group.members.slice(0, 8).map((email) => (
+                          <span key={email} className="chip">
+                            {email}
+                          </span>
+                        ))}
+                        {group.members.length > 8 ? (
+                          <span className="muted">+{group.members.length - 8} more</span>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                   <div className="row-meta">
                     <button
@@ -3363,7 +3523,7 @@ function GroupsTab({ viewers, videos, collections }) {
                         setEditing({
                           id: group.id,
                           name: group.name,
-                          members: new Set(group.members),
+                          members: new Set(group.members || []),
                           collectionIds: new Set(group.collectionIds),
                           videoIds: new Set(group.videoIds),
                         })
@@ -3388,23 +3548,31 @@ function GroupsTab({ viewers, videos, collections }) {
                     aria-label="Group name"
                   />
 
-                  <div className="field-block">
-                    <span className="muted">Members</span>
-                    {viewers.length === 0 ? (
-                      <p className="muted">No approved viewers yet.</p>
-                    ) : (
-                      viewers.map((v) => (
-                        <label key={v.email} className="field-row">
-                          <input
-                            type="checkbox"
-                            checked={editing.members.has(v.email)}
-                            onChange={() => toggleInEditing('members', v.email)}
-                          />
-                          <span>{v.email}</span>
-                        </label>
-                      ))
-                    )}
-                  </div>
+                  {canEditMembers ? (
+                    <div className="field-block">
+                      <span className="muted">Members</span>
+                      {viewers.length === 0 ? (
+                        <p className="muted">No approved viewers yet.</p>
+                      ) : (
+                        viewers.map((v) => (
+                          <label key={v.email} className="field-row">
+                            <input
+                              type="checkbox"
+                              checked={editing.members.has(v.email)}
+                              onChange={() => toggleInEditing('members', v.email)}
+                            />
+                            <span>{v.email}</span>
+                          </label>
+                        ))
+                      )}
+                    </div>
+                  ) : (
+                    <p className="muted">
+                      Membership needs the &ldquo;view the approved viewer list&rdquo;
+                      capability as well as group management — it names people. The
+                      group&rsquo;s name and content scope are still yours to edit.
+                    </p>
+                  )}
 
                   <div className="field-block">
                     <span className="muted">Collections this group can see</span>
