@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import AppShell from '../components/AppShell';
 import { PlayIcon, SearchIcon, ChevronLeftIcon, ChevronRightIcon } from '../components/icons';
 import { auth0 } from '../lib/auth0';
@@ -9,6 +10,7 @@ import { viewerAccessFor } from '../lib/guard';
 import { isGeoAllowed } from '../lib/geo';
 import { withMonitorPage } from '../lib/monitor';
 import { withSiteName } from '../lib/siteNameStore';
+import { linkedQuery } from '../lib/searchLink';
 
 async function gssp({ req, res }) {
   const session = await auth0.getSession(req, res);
@@ -77,6 +79,17 @@ export default function Home({ user, isAdmin: admin, approved, geoBlocked, unver
   const [savedIds, setSavedIds] = useState([]);
   const [queryInput, setQueryInput] = useState('');
   const [query, setQuery] = useState('');
+  const router = useRouter();
+
+  // A link can open the library already searched — the watch page's passage
+  // links do. Read once the router has the URL, and applied to both states
+  // so the results load without waiting out the typing debounce.
+  const linked = router.isReady ? linkedQuery(router.query.q) : '';
+  useEffect(() => {
+    if (!linked) return;
+    setQueryInput(linked);
+    setQuery(linked);
+  }, [linked]);
   const [collections, setCollections] = useState([]);
   const [activeCollection, setActiveCollection] = useState('');
   const [progress, setProgress] = useState([]);

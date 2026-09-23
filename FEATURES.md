@@ -57,6 +57,13 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
   bunny's transcription is asynchronous — but **one click, not two**: queueing records the video, and the admin Videos tab collects whatever bunny has finished since. *Fetch captions* still works for anyone who wants it now. Before this, forgetting the second click left a video that had really been transcribed and paid for, with no transcript and nothing saying why.
   A video that was never transcribed shows no panel at all, and the public watch page never shows one — its visitors are
   signed out, and the transcript endpoint requires an approved viewer.
+- **Search by passage** _(viewer)_ — searching for a Bible passage finds every video whose **notes** cite an
+  **overlapping** passage, however it was written: "Philippians 2" finds notes saying "Phil 1:27–2:11", and "Philippians"
+  finds "Php 4:13". Book names, common abbreviations, numbered books ("1 Cor", "First John", "II Tim"), cross-chapter
+  ranges and verse lists are read, and it only ever **adds** matches. Under the notes on the watch page, the passages they
+  cite appear as links that open the library searched for that passage. Cautious about inventing references: a book name
+  needs a chapter number and a capital letter, the chapter must exist in that book, and an abbreviation typed on its own
+  ("phil") is not read as a book.
 - **Link to a moment** _(viewer, watch page)_ — a *Copy link at 24:15* button under the player copies the page address with the
   current position on it, and opening a link with `?t=` starts there. An explicit timestamp **beats the saved resume
   position**: the viewer followed a link to a point, and sending them where they last stopped would quietly ignore what they
@@ -225,6 +232,11 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - **Library search reads ONE language per video** — the default track, the one ingested first. Indexing every translation of the same sermon would multiply the search payload to return the same video, so searching in Spanish for a talk whose default is English finds nothing. The panel still offers every language once the video is open.
 - **Collection rides on an admin visiting the Videos tab** — there is no webhook and no background worker, so a finished transcription is collected the next time an admin loads that list. If nobody opens it for a day the marker expires and the transcript has to be fetched with the button. A deliberate trade: no new infrastructure, bounded work per request, and the manual button still there.
 - **Group membership needs both capabilities** — naming or changing who is in a group requires `viewers.read` on top of `groups.manage`, because membership is people data: the member addresses, the whole `email → [groupId]` map, and even the per-address refusal ("not an approved viewer") are the approved viewer list by another name. A groups-only manager keeps the registry, the scopes and a member **count**.
+- **Passages in TITLES are matched as plain text** — titles are searched by bunny, which knows nothing about
+  scripture, so a title reading "Phil 2" is found by searching "Phil 2" but not "Philippians 2". Notes are passage-matched
+  in any spelling; putting the passage in the notes is what makes it findable every way. Passage links on the watch page
+  come from the notes for the same reason — a link read from the title might not find its own video. There is no page
+  listing the books a library covers, and only the 66-book Protestant canon is read.
 - **A cut search says so** — two caps shorten a search: 25 note/transcript matches pulled in by id, then the admin's homepage count. Both are now reported rather than quietly returning a shorter list, because a viewer whose sermon was match 26 otherwise saw a search that confidently did not contain it. The count is only claimed when it is **exact**: matches dropped at the union cap were never fetched, so whether they would have survived the group and schedule filters is genuinely unknown, and the notice says "and there are more" rather than inventing a number.
 - **Comments are not implemented** — ratings are (above), but there is no free-text discussion anywhere in the portal. That is a deliberate stop: text other viewers can read needs moderation, reporting and a notion of who may delete whose words, none of which exists here.
 - **Removing a viewer leaves what was recorded about them** — removal clears their tags, roles, groups and feed token, but

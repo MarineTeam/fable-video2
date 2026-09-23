@@ -1186,6 +1186,24 @@ button.chapter-link:focus-visible {
 .video-notes {
   margin-top: 16px;
 }
+/* The passages the notes cite, each a link into the library search. Anchors,
+   so the chip look needs the underline taken off. */
+.passages {
+  margin-top: 12px;
+}
+.passages-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.passages .chips {
+  margin: 0;
+}
+.passage-chip {
+  text-decoration: none;
+}
 .notes-body {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

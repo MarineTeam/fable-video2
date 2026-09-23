@@ -23,6 +23,8 @@ import { isSaved } from '../../lib/mylist';
 import { getRatings } from '../../lib/ratingsStore';
 import { ratingOf } from '../../lib/ratings';
 import { parseTimeParam } from '../../lib/timestampLink';
+import { compareReferences, formatReference, parseReferences } from '../../lib/scripture';
+import { passageSearchHref } from '../../lib/searchLink';
 
 async function gssp({ req, res, params, query }) {
   const id = String(params.id || '');
@@ -154,6 +156,10 @@ export default function Watch({
   saved,
   vote,
 }) {
+  // From the NOTES, not the title: in this repo titles are searched by bunny
+  // as plain text while notes are passage-matched, so only a passage read
+  // from the notes is guaranteed to find this video again when clicked.
+  const passages = parseReferences(notes || '').sort(compareReferences);
   return (
     <AppShell siteName={siteName} user={user} isAdmin={admin} approved wide>
       <Link href="/" className="back-link">
@@ -182,6 +188,25 @@ export default function Watch({
               nodes, so there is no markup to sanitise — which is exactly why
               the field does not accept markup. */}
           <p className="notes-body">{notes}</p>
+          {passages.length ? (
+            <nav className="passages" aria-label="Passages in these notes">
+              {/* Each opens the library searched for that passage, which
+                  finds every video whose notes cite an overlapping one. The
+                  search is the ordinary scoped one, so a link can never show
+                  a viewer something new. */}
+              <span className="passages-label">Passages</span>
+              <div className="chips">
+                {passages.map((ref) => {
+                  const label = formatReference(ref);
+                  return (
+                    <Link key={label} href={passageSearchHref(label)} className="chip passage-chip">
+                      {label}
+                    </Link>
+                  );
+                })}
+              </div>
+            </nav>
+          ) : null}
         </section>
       ) : null}
     </AppShell>
