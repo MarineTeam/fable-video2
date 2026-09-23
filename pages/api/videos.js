@@ -11,6 +11,7 @@ import { matchingNoteGuids } from '../../lib/notes';
 import { loadAllNotes } from '../../lib/notesStore';
 import { matchingTranscriptGuids } from '../../lib/captions';
 import { loadAllTranscriptText } from '../../lib/captionsStore';
+import { bookIndex, parseReferences } from '../../lib/scripture';
 
 const PAGE_SIZE = 10;
 
@@ -26,6 +27,12 @@ const PAGE_SIZE = 10;
 // as though it were the whole truth. A viewer whose sermon was match 26 saw a
 // search that confidently did not contain it.
 const MAX_NOTE_MATCHES = 25;
+
+// "Browse by book" (?index=books) has to see the WHOLE library, and bunny
+// hands it over 100 at a time. Bounded here; a library past it is reported
+// as truncated rather than counted as if complete.
+const INDEX_PAGE_SIZE = 100;
+const MAX_INDEX_PAGES = 10;
 
 async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
@@ -55,6 +62,38 @@ async function handler(req, res) {
   ]);
   const homeCount = Math.min(Math.max(parseInt(countRaw, 10) || 48, 1), 200);
   const order = Array.isArray(orderRaw) ? orderRaw : [];
+
+  // ?index=books — the books the viewer's library cites, for "Browse by
+  // book". A MODE of this route rather than a route of its own: requireViewer
+  // above, and the scope and schedule resolved above, are exactly the gate
+  // and filters the answer needs, and a second route would be a second copy
+  // of them to keep in step. Counted AFTER isPlayable -> scope -> schedule,
+  // because a count is itself information ("Philippians (3)" says three
+  // videos exist). The homepage asks only when the viewer opens the list, so
+  // an ordinary page load costs nothing extra.
+  if (req.query.index === 'books') {
+    try {
+      const all = [];
+      let truncated = false;
+      for (let p = 1; p <= MAX_INDEX_PAGES; p += 1) {
+        const data = await listVideos({ page: p, perPage: INDEX_PAGE_SIZE });
+        const items = data?.items || [];
+        all.push(...items);
+        const totalItems = Number(data?.totalItems) || 0;
+        if (items.length < INDEX_PAGE_SIZE || (totalItems && all.length >= totalItems)) break;
+        if (p === MAX_INDEX_PAGES) truncated = true;
+      }
+      const visible = filterVideosBySchedule(
+        filterVideosByScope(all.filter(isPlayable), scope),
+        schedule
+      );
+      const notesByGuid = await loadAllNotes();
+      const books = bookIndex(visible, (v) => parseReferences(notesByGuid[v.guid] || ''));
+      return res.json({ books, truncated });
+    } catch {
+      return res.status(502).json({ error: 'Could not load the book list' });
+    }
+  }
 
   try {
     // Title search stays server-side at Bunny, which searches the WHOLE

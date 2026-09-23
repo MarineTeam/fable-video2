@@ -79,6 +79,26 @@ export default function Home({ user, isAdmin: admin, approved, geoBlocked, unver
   const [savedIds, setSavedIds] = useState([]);
   const [queryInput, setQueryInput] = useState('');
   const [query, setQuery] = useState('');
+  // "Browse by book". Fetched only when the viewer first OPENS the list: the
+  // index pages through the whole library at bunny, which an ordinary page
+  // load should not pay for. 'idle' | 'loading' | 'error' | 'ready'.
+  const [booksState, setBooksState] = useState('idle');
+  const [books, setBooks] = useState([]);
+  const [booksTruncated, setBooksTruncated] = useState(false);
+  const loadBooks = (e) => {
+    if (!e.currentTarget.open || booksState === 'loading' || booksState === 'ready') return;
+    setBooksState('loading');
+    fetch('/api/videos?index=books')
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d) => {
+        setBooks(d?.books || []);
+        setBooksTruncated(Boolean(d?.truncated));
+        setBooksState('ready');
+      })
+      // A failure says so and can be retried by closing and reopening; it is
+      // never shown as "no passages", which would be a false statement.
+      .catch(() => setBooksState('error'));
+  };
   const router = useRouter();
 
   // A link can open the library already searched — the watch page's passage
@@ -330,6 +350,43 @@ export default function Home({ user, isAdmin: admin, approved, geoBlocked, unver
           />
         </div>
       </div>
+
+      <details className="book-browse" onToggle={loadBooks}>
+        <summary>Browse by book</summary>
+        {booksState === 'ready' && books.length > 0 ? (
+          <div className="chips">
+            {books.map(({ book, count }) => (
+              <button
+                key={book}
+                type="button"
+                className={query === book ? 'chip active' : 'chip'}
+                // The name alone is read as the whole book by the passage
+                // search, which matches the same notes this was counted from.
+                onClick={() => {
+                  setQueryInput(book);
+                  setQuery(book);
+                  setPage(1);
+                }}
+              >
+                {book} <span className="book-count">{count}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="muted book-empty">
+            {booksState === 'loading'
+              ? 'Loading…'
+              : booksState === 'error'
+                ? 'Could not load the book list — close and reopen to try again.'
+                : booksState === 'ready'
+                  ? 'No passages cited in notes yet.'
+                  : null}
+          </p>
+        )}
+        {booksTruncated ? (
+          <p className="muted book-empty">Counted from the first 1,000 videos.</p>
+        ) : null}
+      </details>
 
       {collections.length > 0 ? (
         <div className="chips">
