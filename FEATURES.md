@@ -57,6 +57,12 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
   bunny's transcription is asynchronous — but **one click, not two**: queueing records the video, and the admin Videos tab collects whatever bunny has finished since. *Fetch captions* still works for anyone who wants it now. Before this, forgetting the second click left a video that had really been transcribed and paid for, with no transcript and nothing saying why.
   A video that was never transcribed shows no panel at all, and the public watch page never shows one — its visitors are
   signed out, and the transcript endpoint requires an approved viewer.
+- **Search finds other forms of a word** _(viewer)_ — in notes, "baptism" finds "baptised", "baptized" and
+  "baptizing"; "forgiving" finds "forgiveness". Every word of a multi-word search must appear somewhere in the notes, in
+  any order. It only ever **adds** matches, and it is deliberately cautious: endings that are also ordinary letters
+  ("-er", "-en") are left alone so "Peter" never finds "pet", and words match whole. A search that is a Bible passage is
+  answered by the passage alone. Titles are searched by bunny as plain text, and transcripts stay plain text too (stemming
+  tens of kilobytes per video on every search is a cost the search box cannot carry).
 - **Search by passage** _(viewer)_ — searching for a Bible passage finds every video whose **notes** cite an
   **overlapping** passage, however it was written: "Philippians 2" finds notes saying "Phil 1:27–2:11", and "Philippians"
   finds "Php 4:13". Book names, common abbreviations, numbered books ("1 Cor", "First John", "II Tim"), cross-chapter
