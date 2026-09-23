@@ -279,6 +279,19 @@ function VideosTab({
   const [bulkVideoResult, setBulkVideoResult] = useState(null);
   const [openAnalytics, setOpenAnalytics] = useState(new Set());
   const uploadRefs = useRef({}); // key -> { tusUpload, file, videoId }
+  // The upload zone's "also visible to" groups. Applies to every file dropped
+  // while ticked; starts empty on every visit, deliberately — see
+  // lib/uploadGrants.js on why there is no remembered default.
+  const [grantGroups, setGrantGroups] = useState([]);
+  const [uploadGroups, setUploadGroups] = useState([]);
+
+  useEffect(() => {
+    // Silently absent for someone without groups.manage, the same idiom as
+    // the approval picker; the upload route refuses their groupIds anyway.
+    api('/api/admin/groups')
+      .then((d) => setGrantGroups(d.groups || []))
+      .catch(() => {});
+  }, []);
   const fileInputRef = useRef(null);
 
   const patchUpload = (key, patch) =>
@@ -293,7 +306,20 @@ function VideosTab({
       patchUpload(key, { pct: 0, status: 'starting', error: '' });
     }
     try {
-      const ticket = await api('/api/admin/upload', { method: 'POST', body: { title } });
+      const ticket = await api('/api/admin/upload', {
+        method: 'POST',
+        // groupIds only when something is ticked, so an ordinary upload is the
+        // exact request it always was.
+        body: uploadGroups.length ? { title, groupIds: uploadGroups } : { title },
+      });
+      const failedGroups = ticket.groups?.failed || [];
+      if (failedGroups.length) {
+        patchUpload(key, {
+          warning: `Not added to ${failedGroups
+            .map((id) => grantGroups.find((g) => g.id === id)?.name || id)
+            .join(', ')} — add it on the Groups tab.`,
+        });
+      }
       const tus = await import('tus-js-client');
       const upload = new tus.Upload(file, {
         endpoint: ticket.endpoint,
@@ -680,6 +706,27 @@ function VideosTab({
           </button>
           . Files stream from your browser straight to bunny.net.
         </p>
+        {grantGroups.length > 0 ? (
+          <fieldset className="upload-groups">
+            <legend className="muted">
+              Also visible to groups (optional — applies to files dropped while ticked)
+            </legend>
+            {grantGroups.map((g) => (
+              <label key={g.id} className="upload-group">
+                <input
+                  type="checkbox"
+                  checked={uploadGroups.includes(g.id)}
+                  onChange={(e) =>
+                    setUploadGroups((prev) =>
+                      e.target.checked ? [...prev, g.id] : prev.filter((id) => id !== g.id)
+                    )
+                  }
+                />
+                {g.name}
+              </label>
+            ))}
+          </fieldset>
+        ) : null}
         <input
           ref={fileInputRef}
           type="file"
@@ -697,7 +744,10 @@ function VideosTab({
         <div className="upload-list">
           {uploads.map((u) => (
             <div key={u.key} className="upload-item card">
-              <span className="upload-name">{u.name}</span>
+              <span className="upload-name">
+                {u.name}
+                {u.warning ? <span className="upload-warning"> {u.warning}</span> : null}
+              </span>
               {u.status === 'uploading' || u.status === 'starting' ? (
                 <>
                   <span className="progress-line">

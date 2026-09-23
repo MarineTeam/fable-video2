@@ -1,3 +1,4 @@
+import { pruneVideoFromGroups } from '../../../lib/groups';
 import { withMonitorApi } from "../../../lib/monitor";
 import { requireCapability } from '../../../lib/guard';
 import { CAP } from '../../../lib/capabilities';
@@ -133,6 +134,9 @@ async function handler(req, res) {
       await clearVideoPublic(id);
       // A recycled bunny.net guid must not inherit another video's score.
       await clearVideoRatingCounts(id);
+      // Nor stay granted to a group — a cancelled upload is deleted here, and
+      // the upload may already have ticked it into groups.
+      await pruneVideoFromGroups(id);
       await logAction(admin, 'video.delete', id);
       return res.json({ ok: true });
     } catch {

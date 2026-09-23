@@ -1,3 +1,4 @@
+import { pruneVideoFromGroups } from '../../../lib/groups';
 import { withMonitorApi } from "../../../lib/monitor";
 import { requireCapability } from '../../../lib/guard';
 import { CAP } from '../../../lib/capabilities';
@@ -51,6 +52,7 @@ async function handler(req, res) {
         await r.set(k('order'), orderRaw.filter((g) => !succeeded.has(g)));
       }
     } catch {}
+    await pruneVideoFromGroups([...succeeded]);
   }
 
   const okCount = results.filter((r) => r.ok).length;
