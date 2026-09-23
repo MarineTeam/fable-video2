@@ -72,9 +72,11 @@ async function handler(req, res) {
       await r.srem(k('viewers'), email);
       await r.hdel(k('viewer:lastseen'), email).catch(() => {});
       await clearViewerTags(email);
-      // Removing a viewer removes everything keyed to them, so no orphaned
-      // role assignment or group membership can outlive the account and come
-      // back to life if the same address is re-added later.
+      // Removing a viewer removes their grants, so no orphaned role
+      // assignment or group membership can outlive the account and come back
+      // to life if the same address is re-added later. NOT their progress,
+      // saved list or votes — those stay under their email (FEATURES.md,
+      // known gaps).
       await clearRolesForEmail(email);
       await clearGroupsForEmail(email);
       // A feed token is a bearer credential that survives outside the session,

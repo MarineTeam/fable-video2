@@ -2425,6 +2425,27 @@ function SettingsTab({ pushOn }) {
   const [adminGeoWhitelist, setAdminGeoWhitelist] = useState([]);
   const [adminGeoStatus, setAdminGeoStatus] = useState('');
   const [adminGeoBypassEmails, setAdminGeoBypassEmails] = useState([]);
+  const [recountBusy, setRecountBusy] = useState(false);
+  const [recountStatus, setRecountStatus] = useState('');
+
+  // Rebuilds the thumbs-up/down totals from the votes themselves. New votes
+  // cannot drift any more (one Redis script writes a vote and its counters),
+  // so this is for totals written before that — see
+  // pages/api/admin/rating-recount.js.
+  async function recountRatings() {
+    setRecountBusy(true);
+    setRecountStatus('');
+    try {
+      const data = await api('/api/admin/rating-recount', { method: 'POST' });
+      setRecountStatus(
+        `Recounted ${data.votes} vote${data.votes === 1 ? '' : 's'} from ${data.viewers} viewer${data.viewers === 1 ? '' : 's'}.`
+      );
+    } catch (err) {
+      setRecountStatus(err.message);
+    } finally {
+      setRecountBusy(false);
+    }
+  }
 
   useEffect(() => {
     api('/api/admin/settings')
@@ -2816,6 +2837,26 @@ function SettingsTab({ pushOn }) {
           {adminGeoBypassEmails.length === 0 ? (
             <span className="muted">No bypass emails configured.</span>
           ) : null}
+        </div>
+      </div>
+
+      <div className="card card-pad">
+        <h2 className="section-title">Rating totals</h2>
+        <p className="muted">
+          Rebuilds the 👍/👎 totals on the Videos tab from the votes themselves. A vote and its total
+          are now written together, so they cannot disagree; this corrects totals written before
+          that. Safe to run any time.
+        </p>
+        <div className="inline-form">
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={recountBusy}
+            onClick={recountRatings}
+          >
+            {recountBusy ? 'Recounting…' : 'Recount ratings'}
+          </button>
+          {recountStatus ? <span className="muted">{recountStatus}</span> : null}
         </div>
       </div>
 

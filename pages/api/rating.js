@@ -6,13 +6,8 @@ import { contentScopeFor, isVideoVisible } from '../../lib/groups';
 import { isWithinWindow } from '../../lib/schedule';
 import { getVideoWindow } from '../../lib/scheduleStore';
 import { getVideo } from '../../lib/bunny';
-import {
-  applyRatingCounts,
-  clearRating,
-  getRatings,
-  setRating,
-} from '../../lib/ratingsStore';
-import { countField, normalizeVote, ratingOf, voteDelta } from '../../lib/ratings';
+import { getRatings, recordRating } from '../../lib/ratingsStore';
+import { normalizeVote, ratingOf } from '../../lib/ratings';
 
 // The viewer's own rating of one video.
 //
@@ -78,27 +73,12 @@ async function handler(req, res) {
       return res.status(404).json({ error: 'Not found' });
     }
 
-    const previous = ratingOf(await getRatings(viewer.email), guid);
-    // Re-sending the same vote is a no-op rather than a second increment.
-    if (previous === next) return res.json({ ok: true, vote: next });
-
-    const result = next
-      ? await setRating(viewer.email, guid, next)
-      : await clearRating(viewer.email, guid);
+    // One Redis script writes the vote and moves both counters, reading the
+    // previous vote inside itself — so a repeated vote is a no-op, two racing
+    // clicks cannot both count, and there is no second write left to fail
+    // after the first succeeded. See lib/ratingScripts.js.
+    const result = await recordRating(viewer.email, guid, next);
     if (!result.ok) return res.status(502).json({ error: result.error });
-
-    // AFTER the authoritative write, and outside its error path: the vote has
-    // already succeeded, so a counter failure must not report it as a failure.
-    // That would be the worst answer available — the viewer would see their
-    // click revert while the vote stood, and a retry would no-op with 'ok'.
-    const delta = voteDelta(previous, next);
-    const fields = {};
-    for (const [vote, amount] of Object.entries(delta)) {
-      if (!amount) continue;
-      const field = countField(guid, vote);
-      if (field) fields[field] = amount;
-    }
-    await applyRatingCounts(fields);
 
     return res.json({ ok: true, vote: next });
   }
