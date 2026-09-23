@@ -89,6 +89,9 @@ async function handler(req, res) {
         title: v.title || 'Untitled',
         guid: v.guid,
         enclosureUrl,
+        // A stable address on this app, re-checked per fetch — see
+        // pages/api/feed/[token]/[file].js for why art is not a signed URL.
+        imageUrl: `${base}/api/feed/${encodeURIComponent(String(req.query.token || ''))}/${encodeURIComponent(v.guid)}.jpg`,
         link: `${base}/watch/${v.guid}`,
         pubDate: v.dateUploaded,
         description: notesByGuid[v.guid] || '',

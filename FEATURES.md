@@ -104,7 +104,10 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
   offers, and a service is still a large download. The feed URL is a bearer credential (podcast apps cannot log in), so the
   UI says to treat it like a password and "New link" revokes the old one immediately. Access is re-checked on every fetch,
   items obey groups and publish windows, and removing a viewer revokes their feed. Inert without `BUNNY_CDN_HOSTNAME`, and
-  needs MP4 Fallback enabled on the Bunny library.
+  needs MP4 Fallback enabled on the Bunny library. **Each episode shows its own thumbnail** as artwork (a custom one when
+  set on bunny.net), served from a stable address on this app that is re-checked like the feed on every fetch — so art
+  disappears with access, and apps are not handed an expiring bunny.net link to cache. Thumbnails are 16:9 while podcast
+  apps expect square art, so some apps crop them.
 - **Access-request notifications** — a genuinely new request emails and pushes everyone holding `viewers.manage`, addressed
   by capability rather than a hardcoded list. A re-ask while one is pending does not re-notify, and a notification failure
   never fails the request itself.
