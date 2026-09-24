@@ -7,8 +7,7 @@ import { trustedEmail } from '../../lib/auth';
 import { redis, k } from '../../lib/redis';
 import { viewerAccessFor } from '../../lib/guard';
 import { contentScopeFor, isVideoVisible } from '../../lib/groups';
-import { isWithinWindow } from '../../lib/schedule';
-import { getVideoWindow } from '../../lib/scheduleStore';
+import { isVideoInWindowFor } from '../../lib/scheduleStore';
 import { getVideoChapters } from '../../lib/chaptersStore';
 import { getVideoNotes } from '../../lib/notesStore';
 import { getVideo, signedEmbedUrl } from '../../lib/bunny';
@@ -69,7 +68,7 @@ async function gssp({ req, res, params, query }) {
 
   // Publish window, the direct-URL half of the same gate applied to the list in
   // /api/videos. Staff bypass it so they can preview what they scheduled.
-  if (!admin && !isWithinWindow(await getVideoWindow(video.guid))) {
+  if (!admin && !(await isVideoInWindowFor(video.guid, email))) {
     return { redirect: { destination: '/', permanent: false } };
   }
 

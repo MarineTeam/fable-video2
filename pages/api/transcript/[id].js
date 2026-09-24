@@ -2,8 +2,7 @@ import { withMonitorApi } from '../../../lib/monitor';
 import { requireViewer } from '../../../lib/guard';
 import { oneTrimmed } from '../../../lib/params';
 import { contentScopeFor, isVideoVisible } from '../../../lib/groups';
-import { isWithinWindow } from '../../../lib/schedule';
-import { getVideoWindow } from '../../../lib/scheduleStore';
+import { isVideoInWindowFor } from '../../../lib/scheduleStore';
 import { getVideo } from '../../../lib/bunny';
 import { getVideoTranscript, getTranscriptLanguages } from '../../../lib/captionsStore';
 import { languageMissing, pickLanguage } from '../../../lib/captions';
@@ -17,7 +16,7 @@ import { languageMissing, pickLanguage } from '../../../lib/captions';
 //
 //   1. approved viewer + geo                 (requireViewer)
 //   2. group content gating, enforcement 4   (contentScopeFor/isVideoVisible)
-//   3. publish window, staff exempt          (isWithinWindow)
+//   3. publish window, staff exempt          (isVideoInWindowFor)
 //
 // Note that 2 needs the VIDEO, not just its id — isVideoVisible reads the
 // video's collection — so this route fetches it, exactly as the page does.
@@ -57,7 +56,7 @@ async function handler(req, res) {
     return res.status(404).json({ error: 'Not found' });
   }
 
-  if (!admin && !isWithinWindow(await getVideoWindow(video.guid))) {
+  if (!admin && !(await isVideoInWindowFor(video.guid, viewer.email))) {
     return res.status(404).json({ error: 'Not found' });
   }
 

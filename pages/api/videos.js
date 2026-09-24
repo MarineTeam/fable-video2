@@ -6,7 +6,7 @@ import { redis, k } from '../../lib/redis';
 import { applyOrder } from '../../lib/order';
 import { contentScopeFor, filterVideosByScope } from '../../lib/groups';
 import { filterVideosBySchedule } from '../../lib/schedule';
-import { loadSchedule } from '../../lib/scheduleStore';
+import { loadSchedule, viewerGroupIds } from '../../lib/scheduleStore';
 import { matchingNoteGuids } from '../../lib/notes';
 import { loadAllNotes } from '../../lib/notesStore';
 import { matchingTranscriptGuids } from '../../lib/captions';
@@ -52,13 +52,15 @@ async function handler(req, res) {
   // lib/groups.js. This is one of the three enforcement points that have to
   // agree; the others are /api/collections and the /watch/[id] GSSP.
   const staff = viewer.admin || viewer.staff;
-  const [countRaw, orderRaw, scope, schedule] = await Promise.all([
+  const [countRaw, orderRaw, scope, schedule, groupIds] = await Promise.all([
     r.get(k('settings:homeCount')).catch(() => null),
     r.get(k('order')).catch(() => null),
     contentScopeFor(viewer.email, { staff }),
     // Staff see unpublished and expired videos so they can find and fix them;
     // for everyone else the window applies. Paired with the /watch/[id] check.
     staff ? Promise.resolve({}) : loadSchedule(),
+    // The viewer's groups, for per-group windows (lib/schedule.js).
+    staff ? Promise.resolve([]) : viewerGroupIds(viewer.email),
   ]);
   const homeCount = Math.min(Math.max(parseInt(countRaw, 10) || 48, 1), 200);
   const order = Array.isArray(orderRaw) ? orderRaw : [];
@@ -85,7 +87,9 @@ async function handler(req, res) {
       }
       const visible = filterVideosBySchedule(
         filterVideosByScope(all.filter(isPlayable), scope),
-        schedule
+        schedule,
+        Date.now(),
+        groupIds
       );
       const notesByGuid = await loadAllNotes();
       const books = bookIndex(visible, (v) => parseReferences(notesByGuid[v.guid] || ''));
@@ -149,7 +153,9 @@ async function handler(req, res) {
 
     const playable = filterVideosBySchedule(
       filterVideosByScope(candidates, scope),
-      schedule
+      schedule,
+      Date.now(),
+      groupIds
     );
     const ordered = applyOrder(playable, order);
     const capped = ordered.slice(0, homeCount);

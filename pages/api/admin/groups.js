@@ -5,6 +5,7 @@ import { logAction } from '../../../lib/audit';
 import { normalizeEmail, isValidEmail } from '../../../lib/auth';
 import { CAP, hasCapability } from '../../../lib/capabilities';
 import { redis, k } from '../../../lib/redis';
+import { pruneGroupFromSchedules } from '../../../lib/scheduleStore';
 import {
   loadGroups,
   loadGroupMemberships,
@@ -205,6 +206,10 @@ async function handler(req, res) {
       const current = groupsById[id];
       if (!current) return res.json({ ok: true });
       await deleteGroup(id);
+      // Its publish windows go with it (lib/scheduleStore.js). Best-effort
+      // after the delete itself: a window naming a deleted group matches no
+      // viewer, and is refused if an admin tries to save it again.
+      await pruneGroupFromSchedules(id).catch(() => 0);
       await logAction(admin, 'group.delete', current.name);
       return res.json({ ok: true });
     } catch {

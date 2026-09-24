@@ -5,7 +5,7 @@ import { redis, k } from '../../../lib/redis';
 import { applyOrder } from '../../../lib/order';
 import { contentScopeFor, filterVideosByScope } from '../../../lib/groups';
 import { filterVideosBySchedule } from '../../../lib/schedule';
-import { loadSchedule } from '../../../lib/scheduleStore';
+import { loadSchedule, viewerGroupIds } from '../../../lib/scheduleStore';
 import { loadAllNotes } from '../../../lib/notesStore';
 import { getSiteName } from '../../../lib/siteNameStore';
 import { emailForFeedToken, podcastEnabled } from '../../../lib/podcastStore';
@@ -55,11 +55,12 @@ async function handler(req, res) {
 
   const r = redis();
   const isStaff = owner || staff;
-  const [countRaw, orderRaw, scope, schedule, notesByGuid, siteName] = await Promise.all([
+  const [countRaw, orderRaw, scope, schedule, groupIds, notesByGuid, siteName] = await Promise.all([
     r.get(k('settings:homeCount')).catch(() => null),
     r.get(k('order')).catch(() => null),
     contentScopeFor(email, { staff: isStaff }),
     isStaff ? Promise.resolve({}) : loadSchedule(),
+    isStaff ? Promise.resolve([]) : viewerGroupIds(email),
     loadAllNotes(),
     getSiteName(),
   ]);
@@ -71,7 +72,9 @@ async function handler(req, res) {
     const data = await listVideos({ page: 1, perPage: Math.min(homeCount, 100) });
     videos = filterVideosBySchedule(
       filterVideosByScope((data?.items || []).filter(isPlayable), scope),
-      schedule
+      schedule,
+      Date.now(),
+      groupIds
     );
   } catch {
     return res.status(502).json({ error: 'Video service unavailable' });

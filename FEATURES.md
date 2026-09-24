@@ -198,7 +198,23 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
   would not be a gate), with staff bypassing so they can preview what they scheduled. Stated honestly: this is a
   **publishing convenience, not an embargo** — it fails open (a video is shown if its window can't be read, rather
   than blanking the library on a Redis blip) and an unparseable date is ignored rather than burying content. For
-  anything that genuinely must not be seen, don't upload it yet or scope it to a group.
+  anything that genuinely must not be seen, don't upload it yet or scope it to a group. Dates are typed and shown in
+  the admin's own time zone (before 2026-09-24 the editor sent them as typed, so the server read them in its own zone — UTC on Vercel).
+- **Repeating windows** _(admin, Videos tab → Schedule → "Only at set times each week")_ — pick days and a time range
+  ("Sundays 09:00–13:00", or Wednesday and Sunday evenings) and viewers see the video only inside those slots, still
+  within its dates. Times are read in the time zone the rule was saved in (shown beside the times), so summer time does
+  not move the slot; an end before the start runs past midnight. It applies everywhere the window does — library,
+  search, the book index, watch page, transcripts, My List, ratings, the podcast feed and the public page — and the
+  Schedule button shows "Weekly · on now" or "Weekly · off now". Staff still see the video at any time. It stops new
+  visits; a player already open keeps going until its signed link runs out. One weekly rule per video, the same hours
+  on each chosen day; no monthly or "first Sunday" rule.
+- **Per-group publish windows** _(admin, Videos tab → Schedule)_ — besides the video's own window, give a group its
+  **own** window: youth leaders see Sunday's talk from Wednesday, or a class keeps a video a month after it is hidden
+  for everyone else. Group windows only ever **add** time — a member sees the video during their group's window OR the
+  default one — so they cannot hide a video from a group (group scopes do that), and a video outside a viewer's group
+  scope stays out of reach whatever the window says. The weekly repeat does not limit them, so leaders can preview
+  outside service hours. Deleting a group removes its windows. The editor lists groups only for an admin with
+  groups.manage; anyone else can still edit the dates, and the group windows they cannot see are kept as they were.
 - **Viewer watermark settings** — global on/off default and a viewer-exemption list (see Video playback & security above).
 - **Content-protection panel** — explains the tokenized-playback model and the bunny.net "Block Direct URL File Access" setting.
 

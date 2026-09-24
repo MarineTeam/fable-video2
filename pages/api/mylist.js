@@ -3,8 +3,7 @@ import { requireViewer } from '../../lib/guard';
 import { oneTrimmed } from '../../lib/params';
 import { allowRequest } from '../../lib/ratelimit';
 import { contentScopeFor, isVideoVisible } from '../../lib/groups';
-import { isWithinWindow } from '../../lib/schedule';
-import { getVideoWindow } from '../../lib/scheduleStore';
+import { isVideoInWindowFor } from '../../lib/scheduleStore';
 import { getVideo } from '../../lib/bunny';
 import { getMyList, removeFromMyList, saveToMyList } from '../../lib/mylistStore';
 import { isFull, listIds, MAX_ITEMS } from '../../lib/mylist';
@@ -64,7 +63,7 @@ async function handler(req, res) {
     const scope = await contentScopeFor(viewer.email, { staff: admin });
     if (!isVideoVisible(scope, video)) return res.status(404).json({ error: 'Not found' });
 
-    if (!admin && !isWithinWindow(await getVideoWindow(video.guid))) {
+    if (!admin && !(await isVideoInWindowFor(video.guid, viewer.email))) {
       return res.status(404).json({ error: 'Not found' });
     }
 

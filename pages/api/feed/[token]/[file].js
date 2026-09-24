@@ -3,8 +3,7 @@ import { viewerAccessFor } from '../../../../lib/guard';
 import { getVideo, isPlayable, signedCdnUrl } from '../../../../lib/bunny';
 import { allowRequest } from '../../../../lib/ratelimit';
 import { contentScopeFor, isVideoVisible } from '../../../../lib/groups';
-import { isWithinWindow } from '../../../../lib/schedule';
-import { getVideoWindow } from '../../../../lib/scheduleStore';
+import { isVideoInWindowFor } from '../../../../lib/scheduleStore';
 import { emailForFeedToken, podcastEnabled } from '../../../../lib/podcastStore';
 
 // One podcast episode's ARTWORK: GET /api/feed/<token>/<guid>.jpg.
@@ -75,7 +74,7 @@ async function handler(req, res) {
 
   const scope = await contentScopeFor(email, { staff: isStaff });
   if (!isVideoVisible(scope, video)) return notFound(res);
-  if (!isStaff && !isWithinWindow(await getVideoWindow(video.guid))) return notFound(res);
+  if (!isStaff && !(await isVideoInWindowFor(video.guid, email))) return notFound(res);
 
   const name = String(video.thumbnailFileName || 'thumbnail.jpg');
   if (!THUMBNAIL_FILE.test(name)) return notFound(res);

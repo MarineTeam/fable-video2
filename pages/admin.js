@@ -267,8 +267,6 @@ function VideosTab({
   // already typed has no use for them. Nothing they produce is ever saved.
   const [wantChapters, setWantChapters] = useState(false);
   const [publicStatus, setPublicStatus] = useState('');
-  const [scheduleDraft, setScheduleDraft] = useState({ from: '', until: '' });
-  const [scheduleError, setScheduleError] = useState('');
   const [copiedId, setCopiedId] = useState('');
   const [newCollection, setNewCollection] = useState('');
   const [collectionShareNotice, setCollectionShareNotice] = useState('');
@@ -421,13 +419,8 @@ function VideosTab({
     setCollectionShareNotice('');
   }
 
-  function openSchedule(guid, current) {
-    setScheduleError('');
+  function openSchedule(guid) {
     setScheduleFor(scheduleFor === guid ? null : guid);
-    setScheduleDraft({
-      from: current?.from ? current.from.slice(0, 16) : '',
-      until: current?.until ? current.until.slice(0, 16) : '',
-    });
   }
 
   function toggleAnalytics(guid) {
@@ -573,16 +566,6 @@ function VideosTab({
       reloadVideos();
     } catch (err) {
       setChaptersStatus(err.message);
-    }
-  }
-
-  async function saveSchedule(guid, from, until) {
-    try {
-      await api('/api/admin/schedule', { method: 'POST', body: { guid, from, until } });
-      setScheduleFor(null);
-      reloadVideos();
-    } catch (err) {
-      setScheduleError(err.message);
     }
   }
 
@@ -1016,8 +999,8 @@ function VideosTab({
             <button
               type="button"
               className="btn btn-ghost btn-sm"
-              onClick={() => openSchedule(v.guid, v.schedule)}
-              title="Hide this video until a date, after a date, or both"
+              onClick={() => openSchedule(v.guid)}
+              title="Hide this video until a date, after a date, or both — or show it only at set times each week"
             >
               Schedule
               {windowState(v.schedule) === 'scheduled' ? (
@@ -1027,7 +1010,20 @@ function VideosTab({
                 <span className="badge badge-err">Expired</span>
               ) : null}
               {windowState(v.schedule) === 'live' ? (
-                <span className="badge badge-ok">Windowed</span>
+                <span className="badge badge-ok" title={repeatSummary(v.schedule?.repeat)}>
+                  {v.schedule?.repeat ? 'Weekly · on now' : 'Windowed'}
+                </span>
+              ) : null}
+              {windowState(v.schedule) === 'off-slot' ? (
+                <span className="badge badge-warn" title={repeatSummary(v.schedule?.repeat)}>
+                  Weekly · off now
+                </span>
+              ) : null}
+              {v.schedule?.groups ? (
+                <span className="badge" title="Some groups have their own window">
+                  +{Object.keys(v.schedule.groups).length} group
+                  {Object.keys(v.schedule.groups).length === 1 ? '' : 's'}
+                </span>
               ) : null}
             </button>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => toggleAnalytics(v.guid)}>
@@ -1185,58 +1181,15 @@ function VideosTab({
               </div>
             ) : null}
             {scheduleFor === v.guid ? (
-              <div className="card card-pad">
-                <h3 className="section-title">Publish window</h3>
-                <p className="muted">
-                  Leave both blank for always visible. Staff always see the video regardless, so
-                  you can preview what you scheduled. This hides a video from viewers — it is a
-                  publishing convenience, not an embargo.
-                </p>
-                <div className="field-row">
-                  <label className="field-block">
-                    Visible from
-                    <input
-                      type="datetime-local"
-                      className="input"
-                      value={scheduleDraft.from}
-                      onChange={(e) => setScheduleDraft({ ...scheduleDraft, from: e.target.value })}
-                    />
-                  </label>
-                  <label className="field-block">
-                    Hidden again from
-                    <input
-                      type="datetime-local"
-                      className="input"
-                      value={scheduleDraft.until}
-                      onChange={(e) => setScheduleDraft({ ...scheduleDraft, until: e.target.value })}
-                    />
-                  </label>
-                </div>
-                {scheduleError ? <p className="error-text">{scheduleError}</p> : null}
-                <div className="field-row">
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    onClick={() => saveSchedule(v.guid, scheduleDraft.from, scheduleDraft.until)}
-                  >
-                    Save window
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => saveSchedule(v.guid, '', '')}
-                  >
-                    Clear
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => setScheduleFor(null)}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
+              <SchedulePanel
+                video={v}
+                groups={grantGroups}
+                onClose={() => setScheduleFor(null)}
+                onSaved={() => {
+                  setScheduleFor(null);
+                  reloadVideos();
+                }}
+              />
             ) : null}
             {openAnalytics.has(v.guid) ? (
               <VideoAnalyticsPanel stats={shareRollup[v.guid]} />
@@ -1292,6 +1245,255 @@ function VideosTab({
 
 // Collapsible rollup of existing per-share tracking for one video — reads
 // only fields already stored (see lib/videoAnalytics.js), tracks nothing new.
+const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function repeatSummary(repeat) {
+  if (!repeat) return undefined;
+  return `${repeat.days.map((d) => WEEKDAY_NAMES[d]).join(', ')} ${repeat.start}–${repeat.end} (${repeat.timeZone})`;
+}
+
+function browserTimeZone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  } catch {
+    return 'UTC';
+  }
+}
+
+// datetime-local wants 'YYYY-MM-DDTHH:mm' in the admin's LOCAL time; the API
+// stores UTC ISO strings. Converting here, in the browser, is what makes a
+// typed 09:00 mean 09:00 where the admin is — the server has no idea.
+function toLocalInput(iso) {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+    date.getHours()
+  )}:${pad(date.getMinutes())}`;
+}
+
+function fromLocalInput(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
+// One video's publish window: the default dates, an optional weekly repeat,
+// and optional per-group windows (lib/schedule.js). The whole entry is sent
+// on every save.
+//
+// `groups` is empty for an admin without groups.manage. Their existing group
+// windows are still sent back unchanged, so saving the dates never drops a
+// window they cannot see to edit.
+function SchedulePanel({ video, groups, onClose, onSaved }) {
+  const schedule = video.schedule || null;
+  const [from, setFrom] = useState(toLocalInput(schedule?.from));
+  const [until, setUntil] = useState(toLocalInput(schedule?.until));
+  const existingRepeat = schedule?.repeat || null;
+  const [repeatOn, setRepeatOn] = useState(Boolean(existingRepeat));
+  const [repeatDays, setRepeatDays] = useState(existingRepeat?.days || [0]);
+  const [repeatStart, setRepeatStart] = useState(existingRepeat?.start || '09:00');
+  const [repeatEnd, setRepeatEnd] = useState(existingRepeat?.end || '13:00');
+  const [repeatZone] = useState(existingRepeat?.timeZone || browserTimeZone());
+  const [groupRows, setGroupRows] = useState(() =>
+    Object.entries(schedule?.groups || {}).map(([groupId, w]) => ({
+      groupId,
+      from: toLocalInput(w?.from),
+      until: toLocalInput(w?.until),
+    }))
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const groupName = (id) => groups.find((g) => g.id === id)?.name || id;
+  const toggleDay = (d) =>
+    setRepeatDays((days) => (days.includes(d) ? days.filter((x) => x !== d) : [...days, d].sort()));
+  const patchRow = (index, patch) =>
+    setGroupRows((rows) => rows.map((r, i) => (i === index ? { ...r, ...patch } : r)));
+  const unusedGroups = groups.filter((g) => !groupRows.some((r) => r.groupId === g.id));
+
+  async function save(clear) {
+    setBusy(true);
+    setError('');
+    const groupWindows = {};
+    for (const row of groupRows) {
+      if (!row.groupId || (!row.from && !row.until)) continue;
+      groupWindows[row.groupId] = { from: fromLocalInput(row.from), until: fromLocalInput(row.until) };
+    }
+    try {
+      await api('/api/admin/schedule', {
+        method: 'POST',
+        body: {
+          guid: video.guid,
+          from: clear ? '' : fromLocalInput(from) || '',
+          until: clear ? '' : fromLocalInput(until) || '',
+          repeat:
+            clear || !repeatOn
+              ? null
+              : { days: repeatDays, start: repeatStart, end: repeatEnd, timeZone: repeatZone },
+          groups: clear ? null : groupWindows,
+        },
+      });
+      onSaved();
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card card-pad schedule-panel">
+      <h3 className="section-title">Publish window</h3>
+      <p className="muted">
+        Leave both blank for always visible. Staff always see the video regardless, so you can
+        preview what you scheduled. This hides a video from viewers — it is a publishing
+        convenience, not an embargo.
+      </p>
+      <div className="field-row">
+        <label className="field-block">
+          Visible from
+          <input
+            type="datetime-local"
+            className="input"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+          />
+        </label>
+        <label className="field-block">
+          Hidden again from
+          <input
+            type="datetime-local"
+            className="input"
+            value={until}
+            onChange={(e) => setUntil(e.target.value)}
+          />
+        </label>
+      </div>
+
+      <div className="schedule-repeat">
+        <label className="upload-group">
+          <input type="checkbox" checked={repeatOn} onChange={(e) => setRepeatOn(e.target.checked)} />
+          Only at set times each week
+        </label>
+        {repeatOn ? (
+          <>
+            <div className="schedule-days" role="group" aria-label="Days">
+              {WEEKDAY_NAMES.map((name, d) => (
+                <label key={name} className="upload-group">
+                  <input type="checkbox" checked={repeatDays.includes(d)} onChange={() => toggleDay(d)} />
+                  {name}
+                </label>
+              ))}
+            </div>
+            <div className="field-row schedule-times">
+              <input
+                type="time"
+                className="input"
+                value={repeatStart}
+                onChange={(e) => setRepeatStart(e.target.value)}
+                aria-label="From"
+              />
+              <span className="muted">to</span>
+              <input
+                type="time"
+                className="input"
+                value={repeatEnd}
+                onChange={(e) => setRepeatEnd(e.target.value)}
+                aria-label="Until"
+              />
+              <span className="muted">{repeatZone}</span>
+            </div>
+            <p className="muted schedule-note">
+              Visible to viewers only during these hours, within the dates above. An end time
+              before the start runs past midnight. Group windows below are not limited by this.
+            </p>
+          </>
+        ) : null}
+      </div>
+
+      {groups.length > 0 || groupRows.length > 0 ? (
+        <div className="schedule-groups">
+          <p className="muted schedule-note">
+            Earlier or longer for a group — members of these groups can also watch during their own
+            window. This only ever adds time; it never hides the video from a group (group scopes do
+            that).
+          </p>
+          {groupRows.map((row, index) => (
+            <div key={row.groupId || `new-${index}`} className="schedule-group-row">
+              <select
+                className="input"
+                value={row.groupId}
+                onChange={(e) => patchRow(index, { groupId: e.target.value })}
+                aria-label="Group"
+                disabled={groups.length === 0}
+              >
+                <option value="">Choose a group…</option>
+                {row.groupId && !groups.some((g) => g.id === row.groupId) ? (
+                  <option value={row.groupId}>{groupName(row.groupId)}</option>
+                ) : null}
+                {groups
+                  .filter((g) => g.id === row.groupId || !groupRows.some((r) => r.groupId === g.id))
+                  .map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+              </select>
+              <input
+                type="datetime-local"
+                className="input"
+                value={row.from}
+                onChange={(e) => patchRow(index, { from: e.target.value })}
+                aria-label="Group visible from"
+                title="Visible to this group from"
+              />
+              <input
+                type="datetime-local"
+                className="input"
+                value={row.until}
+                onChange={(e) => patchRow(index, { until: e.target.value })}
+                aria-label="Group hidden again from"
+                title="Hidden again from (for this group)"
+              />
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                aria-label="Remove group window"
+                onClick={() => setGroupRows((rows) => rows.filter((_, i) => i !== index))}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          {unusedGroups.length > 0 ? (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => setGroupRows((rows) => [...rows, { groupId: '', from: '', until: '' }])}
+            >
+              Add a group window
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {error ? <p className="error-text">{error}</p> : null}
+      <div className="field-row">
+        <button type="button" className="btn btn-primary btn-sm" disabled={busy} onClick={() => save(false)}>
+          Save window
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={() => save(true)}>
+          Clear
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function VideoAnalyticsPanel({ stats }) {
   if (!stats) {
     return (

@@ -1375,6 +1375,55 @@ button.transcript-link:focus-visible {
   gap: 0.4rem;
   font-size: 0.85rem;
 }
+/* Admin Videos tab: the publish-window panel's weekly repeat and group
+   windows. A group row keeps the group and its remove button on one line and
+   the two dates on the next, stacking the dates on a phone. */
+.schedule-repeat,
+.schedule-groups {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+  margin: 0.4rem 0 0.8rem;
+}
+.schedule-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.8rem;
+}
+.schedule-times {
+  gap: 0.5rem;
+}
+.schedule-note {
+  margin: 0;
+  font-size: 0.82rem;
+}
+.schedule-group-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 0.4rem;
+  align-items: center;
+  width: 100%;
+}
+.schedule-group-row > select {
+  grid-column: 1 / 3;
+}
+.schedule-group-row > .btn {
+  grid-column: 3;
+  grid-row: 1;
+}
+@media (max-width: 480px) {
+  .schedule-group-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .schedule-group-row > select,
+  .schedule-group-row > input {
+    grid-column: 1;
+  }
+  .schedule-group-row > .btn {
+    grid-column: 2;
+  }
+}
 .upload-warning {
   display: block;
   font-size: 0.8rem;
