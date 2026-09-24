@@ -3,6 +3,25 @@
 All notable changes to the Marine Video Portal. Dates are UTC, matching the
 commit history (`git log --oneline`).
 
+## Unreleased — The whole library, not the newest 100
+
+Every list that means "the library" asked bunny for one page of 100 and
+stopped. Now read in full (`lib/videoLibrary.js`, up to 1,000 videos):
+
+- **Admin Videos tab** — lists every video, so older ones can be renamed,
+  scheduled and transcribed again; says so if the library is larger than it
+  can show.
+- **Analytics** — total views, most-watched and the video count cover the
+  whole library.
+- **Homepage and podcast feed** — a viewer's groups, publish windows and the
+  custom order are applied before the list is cut, so a group granted an
+  older collection no longer sees an empty homepage or feed, and a homepage
+  count above 100 is honoured.
+- **Reordering** a library of more than 500 videos no longer fails silently.
+- **Search** says so when bunny matched more titles than one page returns.
+- **Fix:** the transcript search box had no border (it used a colour variable
+  that did not exist).
+
 ## 2026-09-24 — Search, scheduling, transcripts, comments (#26)
 
 **Deploy note:** set `CRON_SECRET` (16+ random characters) in Vercel to switch

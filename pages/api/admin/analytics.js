@@ -1,7 +1,8 @@
 import { withMonitorApi } from "../../../lib/monitor";
 import { requireCapability } from '../../../lib/guard';
 import { CAP } from '../../../lib/capabilities';
-import { listVideos, getStatistics } from '../../../lib/bunny';
+import { getStatistics } from '../../../lib/bunny';
+import { listAllVideos } from '../../../lib/videoLibrary';
 
 // Views / watch time / most-watched from bunny.net video stats + the
 // statistics API. Every sub-fetch is best-effort so a partial outage still
@@ -15,14 +16,16 @@ async function handler(req, res) {
   const from = new Date(now.getTime() - 30 * 24 * 3600 * 1000);
 
   const [list, stats] = await Promise.all([
-    listVideos({ page: 1, perPage: 100 }).catch(() => null),
+    // Every video, so total views and the most-watched list are not drawn
+    // from the newest 100 alone.
+    listAllVideos().catch(() => null),
     getStatistics({
       dateFrom: from.toISOString().slice(0, 10),
       dateTo: now.toISOString().slice(0, 10),
     }).catch(() => null),
   ]);
 
-  const items = list?.items || [];
+  const items = list?.videos || [];
   const totalViews = items.reduce((sum, v) => sum + (v.views || 0), 0);
   const top = [...items]
     .sort((a, b) => (b.views || 0) - (a.views || 0))
@@ -44,7 +47,11 @@ async function handler(req, res) {
   const watchMinutes = Object.values(watchMap).reduce((sum, v) => sum + (Number(v) || 0), 0);
 
   res.json({
-    videoCount: list?.totalItems ?? items.length,
+    videoCount: list?.total ?? items.length,
+    // The library is larger than a whole-library read; the counts cover the
+    // newest videos only.
+    truncated: Boolean(list?.truncated),
+    covered: items.length,
     totalViews,
     views30,
     watchHours: Math.round((watchMinutes / 60) * 10) / 10,

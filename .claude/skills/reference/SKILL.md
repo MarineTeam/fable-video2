@@ -50,7 +50,7 @@ newline pasted into Vercel corrupts TUS signatures (see change-control skill).
 
 | Function (`lib/bunny.js`) | Method + path | Notes |
 |---|---|---|
-| `listVideos({page, perPage, search, collection})` | GET `/videos?page=&itemsPerPage=&orderBy=date[&search=&collection=]` | Max 100/page used by the app |
+| `listVideos({page, perPage, search, collection})` | GET `/videos?page=&itemsPerPage=&orderBy=date[&search=&collection=]` | Max 100/page. Anything meaning "the library" goes through `listAllVideos()` in `lib/videoLibrary.js` (every page, up to 1,000, `truncated` past that) — never page 1 alone |
 | `getVideo(id)` | GET `/videos/{id}` | |
 | `createVideo(title, collectionId)` | POST `/videos` body `{title[, collectionId]}` | Returns `{guid, ...}` |
 | `updateVideo(id, fields)` | POST `/videos/{id}` | Bunny uses POST, not PATCH, for updates |
