@@ -51,6 +51,57 @@ const config = [
     },
     rules: { 'no-undef': 'error' },
   },
+  {
+    // The same rule on browser code. Its absence hid the access-request queue
+    // (2026-08-31 to 2026-09-24): the loader and the Approve / Dismiss
+    // handlers were pasted into AddViewersByTag instead of ViewersTab, where
+    // setRequests and friends do not exist. Lint was green, the catches
+    // swallowed the ReferenceErrors, and the queue simply never loaded. The
+    // globals are listed rather than taken from a package, like the block
+    // above, so a new one is a deliberate line here and a missing one fails
+    // lint loudly.
+    //
+    // NEGATIVE CONTROL: reference an undeclared name in any page or component
+    // and `npm run lint` must fail with "'<name>' is not defined".
+    files: ['pages/**/*.js', 'components/**/*.js'],
+    ignores: ['pages/api/**'],
+    languageOptions: {
+      globals: {
+        window: 'readonly',
+        document: 'readonly',
+        navigator: 'readonly',
+        location: 'readonly',
+        localStorage: 'readonly',
+        sessionStorage: 'readonly',
+        fetch: 'readonly',
+        console: 'readonly',
+        process: 'readonly',
+        URL: 'readonly',
+        URLSearchParams: 'readonly',
+        setTimeout: 'readonly',
+        clearTimeout: 'readonly',
+        setInterval: 'readonly',
+        clearInterval: 'readonly',
+        requestAnimationFrame: 'readonly',
+        cancelAnimationFrame: 'readonly',
+        AbortController: 'readonly',
+        Notification: 'readonly',
+        Image: 'readonly',
+        Blob: 'readonly',
+        File: 'readonly',
+        FileReader: 'readonly',
+        FormData: 'readonly',
+        atob: 'readonly',
+        btoa: 'readonly',
+        Intl: 'readonly',
+        crypto: 'readonly',
+        TextEncoder: 'readonly',
+        confirm: 'readonly',
+        alert: 'readonly',
+      },
+    },
+    rules: { 'no-undef': 'error' },
+  },
 ];
 
 export default config;

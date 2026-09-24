@@ -3,6 +3,18 @@
 All notable changes to the Marine Video Portal. Dates are UTC, matching the
 commit history (`git log --oneline`).
 
+## 2026-09-24 — Access-request queue fix
+
+- **Fix: the Viewers tab's "Pending access requests" queue never loaded.**
+  Since it was added (2026-08-31) its loader and its Approve / Dismiss
+  handlers sat inside a different component (`AddViewersByTag`), where the
+  state they set does not exist; the errors were swallowed, so the queue was
+  always empty and requests could only be approved by adding the address by
+  hand. They now live in the Viewers tab. Request emails and pushes were
+  unaffected.
+- Lint now checks page and component code for undefined names too (it
+  covered only server code), so the same mistake fails lint.
+
 ## Unreleased — The whole library, not the newest 100
 
 Every list that means "the library" asked bunny for one page of 100 and
