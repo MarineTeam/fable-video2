@@ -123,6 +123,8 @@ export default function Admin({ user, mailOn, pushOn, owner, capabilities, siteN
     resetMonitorCalls();
   }, [tab]);
   const [videos, setVideos] = useState([]);
+  // True when the library is larger than the admin list can read in full.
+  const [videosTruncated, setVideosTruncated] = useState(false);
   const [collections, setCollections] = useState([]);
   const [viewers, setViewers] = useState([]);
   const [shares, setShares] = useState([]);
@@ -136,6 +138,7 @@ export default function Admin({ user, mailOn, pushOn, owner, capabilities, siteN
     try {
       const data = await api('/api/admin/videos');
       setVideos(data.videos || []);
+      setVideosTruncated(Boolean(data.truncated));
       setLoadError('');
     } catch (err) {
       setLoadError(err.message);
@@ -206,6 +209,7 @@ export default function Admin({ user, mailOn, pushOn, owner, capabilities, siteN
       {tab === 'Videos' ? (
         <VideosTab
           videos={videos}
+          truncated={videosTruncated}
           setVideos={setVideos}
           collections={collections}
           viewers={viewers}
@@ -237,6 +241,7 @@ const BULK_SHARE_MAX_VIDEOS = 50;
 
 function VideosTab({
   videos,
+  truncated,
   setVideos,
   collections,
   viewers,
@@ -774,6 +779,12 @@ function VideosTab({
           aria-label="Filter videos"
         />
       </div>
+      {truncated ? (
+        <div className="notice">
+          The library has more videos than this list can show — these are the newest{' '}
+          {videos.length}. Older ones still play and can be found by search.
+        </div>
+      ) : null}
       {!dragEnabled && videos.length > 1 ? (
         <p className="muted">Clear the filter to drag-reorder.</p>
       ) : null}
@@ -3305,6 +3316,12 @@ function AnalyticsTab({ shareRollup }) {
           <span className="stat-label">Videos</span>
         </div>
       </div>
+      {data.truncated ? (
+        <p className="muted">
+          Total views and most-watched cover the newest {data.covered} videos, not the whole
+          library.
+        </p>
+      ) : null}
 
       <div className="card card-pad">
         <h2 className="section-title">Views — last 30 days</h2>

@@ -3,6 +3,9 @@ import { requireCapability } from '../../../lib/guard';
 import { CAP } from '../../../lib/capabilities';
 import { redis, k } from '../../../lib/redis';
 import { logAction } from '../../../lib/audit';
+// The Videos tab saves the order of the whole list it shows, which is up to
+// this many videos; a lower bound here made reordering a larger library fail.
+import { MAX_LIBRARY_VIDEOS } from '../../../lib/videoLibrary';
 
 async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
@@ -12,7 +15,7 @@ async function handler(req, res) {
   const order = req.body?.order;
   if (
     !Array.isArray(order) ||
-    order.length > 500 ||
+    order.length > MAX_LIBRARY_VIDEOS ||
     order.some((g) => typeof g !== 'string' || !g || g.length > 64)
   ) {
     return res.status(400).json({ error: 'Bad order' });

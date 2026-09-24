@@ -3,11 +3,11 @@ import { withMonitorApi } from "../../../lib/monitor";
 import { requireCapability } from '../../../lib/guard';
 import { CAP } from '../../../lib/capabilities';
 import {
-  listVideos,
   updateVideo,
   deleteVideo,
   thumbnailUrl,
 } from '../../../lib/bunny';
+import { listAllVideos } from '../../../lib/videoLibrary';
 import { redis, k } from '../../../lib/redis';
 import { applyOrder } from '../../../lib/order';
 import { loadSchedule } from '../../../lib/scheduleStore';
@@ -29,8 +29,10 @@ async function handler(req, res) {
 
   if (req.method === 'GET') {
     try {
-      const data = await listVideos({ page: 1, perPage: 100 });
-      const items = data?.items || [];
+      // The whole library, not bunny's newest 100 — a video past the first
+      // page used to have no row here, so it could not be renamed, scheduled
+      // or transcribed. See lib/videoLibrary.js.
+      const { videos: items, truncated } = await listAllVideos();
       // Announce freshly finished uploads (atomic once-only guard inside).
       await announceNewVideos(items).catch(() => {});
       // Best-effort, same contract: collect any transcription bunny has
@@ -60,6 +62,9 @@ async function handler(req, res) {
       // admin WHO rated anything. See lib/ratings.js.
       const ratings = countsByVideo(await getRatingCounts());
       return res.json({
+        // True only for a library past lib/videoLibrary.js's bound; the tab
+        // says so rather than presenting the list as complete.
+        truncated,
         videos: ordered.map((v) => ({
           guid: v.guid,
           title: v.title,

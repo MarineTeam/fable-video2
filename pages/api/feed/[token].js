@@ -1,6 +1,7 @@
 import { withMonitorApi } from '../../../lib/monitor';
 import { viewerAccessFor } from '../../../lib/guard';
-import { listVideos, signedCdnUrl, isPlayable } from '../../../lib/bunny';
+import { signedCdnUrl, isPlayable } from '../../../lib/bunny';
+import { listAllVideos } from '../../../lib/videoLibrary';
 import { redis, k } from '../../../lib/redis';
 import { applyOrder } from '../../../lib/order';
 import { contentScopeFor, filterVideosByScope } from '../../../lib/groups';
@@ -69,9 +70,12 @@ async function handler(req, res) {
 
   let videos;
   try {
-    const data = await listVideos({ page: 1, perPage: Math.min(homeCount, 100) });
+    // The whole library, filtered BEFORE the feed is cut to its newest items:
+    // filtering bunny's newest page instead left a subscriber whose groups
+    // grant an older collection with an empty feed.
+    const { videos: all } = await listAllVideos();
     videos = filterVideosBySchedule(
-      filterVideosByScope((data?.items || []).filter(isPlayable), scope),
+      filterVideosByScope(all.filter(isPlayable), scope),
       schedule,
       Date.now(),
       groupIds
@@ -81,8 +85,10 @@ async function handler(req, res) {
   }
 
   const base = `https://${req.headers.host}`;
+  // The admin's homepage count still bounds the feed, as it did when it set
+  // how many of the newest videos were fetched.
   const items = applyOrder(videos, order)
-    .slice(0, MAX_ITEMS)
+    .slice(0, Math.min(homeCount, MAX_ITEMS))
     .map((v) => {
       const enclosureUrl = signedCdnUrl(
         mp4Path(v.guid, lowestRenditionHeight(v)),

@@ -12,6 +12,7 @@ import { loadAllNotes } from '../../lib/notesStore';
 import { matchingTranscriptGuids } from '../../lib/captions';
 import { loadAllTranscriptText, matchingTranslatedGuids } from '../../lib/captionsStore';
 import { bookIndex, parsePassageQuery, parseReferences, passageMatches } from '../../lib/scripture';
+import { listAllVideos } from '../../lib/videoLibrary';
 
 const PAGE_SIZE = 10;
 
@@ -27,27 +28,6 @@ const PAGE_SIZE = 10;
 // as though it were the whole truth. A viewer whose sermon was match 26 saw a
 // search that confidently did not contain it.
 const MAX_NOTE_MATCHES = 25;
-
-// "Browse by book" (?index=books), and a search that IS a passage, have to see
-// every TITLE in the library, and bunny hands them over 100 at a time.
-// Bounded here; a library past it is reported as truncated rather than
-// answered as if complete.
-const INDEX_PAGE_SIZE = 100;
-const MAX_INDEX_PAGES = 10;
-
-async function listWholeLibrary() {
-  const all = [];
-  let truncated = false;
-  for (let p = 1; p <= MAX_INDEX_PAGES; p += 1) {
-    const data = await listVideos({ page: p, perPage: INDEX_PAGE_SIZE });
-    const items = data?.items || [];
-    all.push(...items);
-    const totalItems = Number(data?.totalItems) || 0;
-    if (items.length < INDEX_PAGE_SIZE || (totalItems && all.length >= totalItems)) break;
-    if (p === MAX_INDEX_PAGES) truncated = true;
-  }
-  return { all, truncated };
-}
 
 // The passages a video cites, from its title AND its notes — the same reading
 // the sibling repos use, so "Phil 2 — Humility" counts as Philippians.
@@ -94,7 +74,7 @@ async function handler(req, res) {
   // an ordinary page load costs nothing extra.
   if (req.query.index === 'books') {
     try {
-      const { all, truncated } = await listWholeLibrary();
+      const { videos: all, truncated } = await listAllVideos();
       const visible = filterVideosBySchedule(
         filterVideosByScope(all.filter(isPlayable), scope),
         schedule,
@@ -123,8 +103,29 @@ async function handler(req, res) {
     // here, goes through exactly the same isPlayable -> group scope ->
     // publish window pipeline below, so widening the search can never widen
     // what a given viewer is allowed to see.
-    const data = await listVideos({ page: 1, perPage: Math.min(homeCount, 100), search, collection });
-    const found = (data?.items || []).filter(isPlayable);
+    //
+    // WITHOUT a search the candidates are the whole library (lib/videoLibrary.js),
+    // not bunny's newest page: the scope, the publish windows and the admin's
+    // custom order all apply BEFORE `homeCount` cuts the list, so reading only
+    // the newest 100 first meant a group granted an older collection saw
+    // nothing, a video dragged to the top from further back never appeared,
+    // and a homepage count above 100 could not be honoured.
+    let found;
+    // True when bunny's title search matched more than one page returns.
+    let titleSearchCut = false;
+    if (search) {
+      const data = await listVideos({ page: 1, perPage: 100, search, collection });
+      const items = data?.items || [];
+      titleSearchCut = Number(data?.totalItems) > items.length;
+      found = items.filter(isPlayable);
+    } else {
+      // A library past the read bound is not reported here: the homepage shows
+      // at most `homeCount` (200) anyway, and the admin Videos tab says so.
+      const { videos: all } = await listAllVideos();
+      found = all.filter(
+        (v) => isPlayable(v) && (!collection || (v.collectionId || '') === collection)
+      );
+    }
 
     let candidates = found;
     // How many note/transcript matches were found but never fetched. Nonzero
@@ -176,7 +177,7 @@ async function handler(req, res) {
       const passage = parsePassageQuery(search);
       if (passage) {
         try {
-          const { all, truncated } = await listWholeLibrary();
+          const { videos: all, truncated } = await listAllVideos();
           titleScanIncomplete = truncated;
           const have = new Set(candidates.map((v) => v.guid));
           const byTitle = all.filter(
@@ -225,13 +226,15 @@ async function handler(req, res) {
       // Only meaningful while SEARCHING. On the unfiltered view `homeCount` is
       // the admin's display choice doing exactly what it is for, and calling
       // that "truncated" would put a warning on every ordinary page load.
-      truncated: Boolean(search) && (ordered.length > homeCount || unionDropped > 0 || titleScanIncomplete),
+      truncated:
+        Boolean(search) &&
+        (ordered.length > homeCount || unionDropped > 0 || titleScanIncomplete || titleSearchCut),
       // What matched, before the display cap. EXACT only when the note union
       // was not cut: the matches dropped there were never fetched, so whether
       // they would have survived the scope and schedule filters is unknown,
       // and claiming a precise total would be inventing one.
       matched: ordered.length,
-      matchedExact: unionDropped === 0 && !titleScanIncomplete,
+      matchedExact: unionDropped === 0 && !titleScanIncomplete && !titleSearchCut,
     });
   } catch {
     res.status(502).json({ error: 'Video service unavailable' });
