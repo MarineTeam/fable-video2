@@ -115,7 +115,7 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
   the iOS icon and the podcast cover, with no redeploy. It is cropped to a square from the centre and resized in the
   browser; the server re-checks every size is a PNG of exactly that size before storing it — never an SVG, which could
   carry script. **Reset to default** brings the built-in icon back. Installed apps pick it up when their browser next
-  re-checks the manifest. The notification icon stays the built-in one, and a custom icon is offered to Android as a
+  re-checks the manifest. Push notifications show it too; only the notification badge (drawn by Android as a one-colour silhouette) stays built-in, and a custom icon is offered to Android as a
   plain icon rather than a "maskable" one, since an arbitrary image has no guaranteed safe zone.
 - **Adjustable site name** _(admin, Settings tab)_ — the portal's display name, editable live with no redeploy.
   Applies to the header on every page, the recipient-facing share/bundle shell, the browser tab title, and the PWA
