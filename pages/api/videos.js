@@ -10,7 +10,7 @@ import { loadSchedule, viewerGroupIds } from '../../lib/scheduleStore';
 import { matchingNoteGuids } from '../../lib/notes';
 import { loadAllNotes } from '../../lib/notesStore';
 import { matchingTranscriptGuids } from '../../lib/captions';
-import { loadAllTranscriptText } from '../../lib/captionsStore';
+import { loadAllTranscriptText, matchingTranslatedGuids } from '../../lib/captionsStore';
 import { bookIndex, parseReferences } from '../../lib/scripture';
 
 const PAGE_SIZE = 10;
@@ -123,13 +123,18 @@ async function handler(req, res) {
       // shape of claim as a note match — "this video is about that" — so it
       // joins the same list and obeys the same cap, rather than getting its
       // own budget of Bunny round trips.
-      const [notesByGuid, transcriptText] = await Promise.all([
+      // Translations are matched inside Redis and arrive as guids only
+      // (lib/captionsStore.js), so every language is searched without
+      // loading every language.
+      const [notesByGuid, transcriptText, translatedGuids] = await Promise.all([
         loadAllNotes(),
         loadAllTranscriptText(),
+        matchingTranslatedGuids(search),
       ]);
       const matched = new Set([
         ...matchingNoteGuids(notesByGuid, search),
         ...matchingTranscriptGuids(transcriptText, search),
+        ...translatedGuids,
       ]);
       const eligible = [...matched].filter((guid) => !seen.has(guid)).sort();
       // Recorded before the slice: once they are gone there is nothing left
