@@ -65,12 +65,13 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
   ("-er", "-en") are left alone so "Peter" never finds "pet", and words match whole. A search that is a Bible passage is
   answered by the passage alone. Titles are searched by bunny as plain text, and transcripts stay plain text too (stemming
   tens of kilobytes per video on every search is a cost the search box cannot carry).
-- **Search by passage** _(viewer)_ — searching for a Bible passage finds every video whose **notes** cite an
-  **overlapping** passage, however it was written: "Philippians 2" finds notes saying "Phil 1:27–2:11", and "Philippians"
-  finds "Php 4:13". Book names, common abbreviations, numbered books ("1 Cor", "First John", "II Tim"), cross-chapter
-  ranges and verse lists are read, and it only ever **adds** matches. Under the notes on the watch page, the passages they
-  cite appear as links that open the library searched for that passage. **Browse by book** on the homepage (collapsed,
-  and only loaded when opened — it pages through the whole library at bunny) lists every book the viewer's notes cite,
+- **Search by passage** _(viewer)_ — searching for a Bible passage finds every video whose **title or notes** cite an
+  **overlapping** passage, however it was written: "Philippians 2" finds "Phil 1:27–2:11", and "Philippians" finds
+  "Php 4:13". bunny's own title search is plain text, so for a query that is a passage — and only then — every title is
+  read and passage-matched here (up to 1,000 videos; past that the search says it was cut). Book names, common abbreviations, numbered books ("1 Cor", "First John", "II Tim"), cross-chapter
+  ranges and verse lists are read, and it only ever **adds** matches. Under the notes on the watch page, the passages the title
+  and notes cite appear as links that open the library searched for that passage. **Browse by book** on the homepage (collapsed,
+  and only loaded when opened — it pages through the whole library at bunny) lists every book the viewer's titles and notes cite,
   with how many videos cite it; clicking one searches that book. Counted after the same playable, group and schedule
   filters as the list, since a count is itself information; a library past 1,000 videos says it was cut. Cautious about inventing references: a book name
   needs a chapter number and a capital letter, the chapter must exist in that book, and an abbreviation typed on its own
@@ -269,12 +270,10 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - **Search matches a phrase, not a translation of one** — every language bunny produced is searched, but each as written: searching "lost sheep" finds a sermon that says it in English, not one that only says "oveja perdida". Accents are part of a word ("donde" does not find "dónde"), as they already were for the default language. Translation matches share the same 25-match union cap as notes and the default transcript.
 - **Automatic transcript collection is daily unless you are on Vercel Pro** — bunny has no webhook, so finished transcriptions are collected when an admin opens the Videos tab and by a scheduled job. On Hobby the job may only run once a day (Vercel's rule), so without an admin visit a transcript can take up to a day to appear; on Pro the schedule can be every 15 minutes. The job is off until `CRON_SECRET` is set. A job bunny never finishes is given up after three days (long enough for at least two scheduled attempts) and has to be fetched with the button.
 - **Group membership needs both capabilities** — naming or changing who is in a group requires `viewers.read` on top of `groups.manage`, because membership is people data: the member addresses, the whole `email → [groupId]` map, and even the per-address refusal ("not an approved viewer") are the approved viewer list by another name. A groups-only manager keeps the registry, the scopes and a member **count**.
-- **Passages in TITLES are matched as plain text** — titles are searched by bunny, which knows nothing about
-  scripture, so a title reading "Phil 2" is found by searching "Phil 2" but not "Philippians 2". Notes are passage-matched
-  in any spelling; putting the passage in the notes is what makes it findable every way. Passage links on the watch page
-  come from the notes for the same reason — a link read from the title might not find its own video. Browsing is by
-  book, counted from notes; only the 66-book Protestant canon is read.
-- **A cut search says so** — two caps shorten a search: 25 note/transcript matches pulled in by id, then the admin's homepage count. Both are now reported rather than quietly returning a shorter list, because a viewer whose sermon was match 26 otherwise saw a search that confidently did not contain it. The count is only claimed when it is **exact**: matches dropped at the union cap were never fetched, so whether they would have survived the group and schedule filters is genuinely unknown, and the notice says "and there are more" rather than inventing a number.
+- **A passage search reads at most 1,000 titles** — bunny searches titles as plain text, so a passage query reads every
+  title itself, 100 per request, and stops at 1,000 (the same bound as Browse by book). A larger library is told the
+  search was cut rather than shown a confident short list. Only the 66-book Protestant canon is read.
+- **A cut search says so** — two caps shorten a search: 25 note/transcript matches pulled in by id, then the admin's homepage count (and a passage search that could not read every title is reported the same way). Both are now reported rather than quietly returning a shorter list, because a viewer whose sermon was match 26 otherwise saw a search that confidently did not contain it. The count is only claimed when it is **exact**: matches dropped at the union cap were never fetched, so whether they would have survived the group and schedule filters is genuinely unknown, and the notice says "and there are more" rather than inventing a number.
 - **Comments are not implemented** — ratings are (above), but there is no free-text discussion anywhere in the portal. That is a deliberate stop: text other viewers can read needs moderation, reporting and a notion of who may delete whose words, none of which exists here.
 - **Removing a viewer leaves what was recorded about them** — removal clears their tags, roles, groups and feed token, but
   their progress, saved list and votes stay under their email until something deletes them, and nothing does yet. Their

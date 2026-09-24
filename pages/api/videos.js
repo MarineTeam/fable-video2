@@ -11,7 +11,7 @@ import { matchingNoteGuids } from '../../lib/notes';
 import { loadAllNotes } from '../../lib/notesStore';
 import { matchingTranscriptGuids } from '../../lib/captions';
 import { loadAllTranscriptText, matchingTranslatedGuids } from '../../lib/captionsStore';
-import { bookIndex, parseReferences } from '../../lib/scripture';
+import { bookIndex, parsePassageQuery, parseReferences, passageMatches } from '../../lib/scripture';
 
 const PAGE_SIZE = 10;
 
@@ -28,11 +28,30 @@ const PAGE_SIZE = 10;
 // search that confidently did not contain it.
 const MAX_NOTE_MATCHES = 25;
 
-// "Browse by book" (?index=books) has to see the WHOLE library, and bunny
-// hands it over 100 at a time. Bounded here; a library past it is reported
-// as truncated rather than counted as if complete.
+// "Browse by book" (?index=books), and a search that IS a passage, have to see
+// every TITLE in the library, and bunny hands them over 100 at a time.
+// Bounded here; a library past it is reported as truncated rather than
+// answered as if complete.
 const INDEX_PAGE_SIZE = 100;
 const MAX_INDEX_PAGES = 10;
+
+async function listWholeLibrary() {
+  const all = [];
+  let truncated = false;
+  for (let p = 1; p <= MAX_INDEX_PAGES; p += 1) {
+    const data = await listVideos({ page: p, perPage: INDEX_PAGE_SIZE });
+    const items = data?.items || [];
+    all.push(...items);
+    const totalItems = Number(data?.totalItems) || 0;
+    if (items.length < INDEX_PAGE_SIZE || (totalItems && all.length >= totalItems)) break;
+    if (p === MAX_INDEX_PAGES) truncated = true;
+  }
+  return { all, truncated };
+}
+
+// The passages a video cites, from its title AND its notes — the same reading
+// the sibling repos use, so "Phil 2 — Humility" counts as Philippians.
+const citedIn = (video, notes) => parseReferences(`${video?.title || ''}\n${notes || ''}`);
 
 async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
@@ -75,16 +94,7 @@ async function handler(req, res) {
   // an ordinary page load costs nothing extra.
   if (req.query.index === 'books') {
     try {
-      const all = [];
-      let truncated = false;
-      for (let p = 1; p <= MAX_INDEX_PAGES; p += 1) {
-        const data = await listVideos({ page: p, perPage: INDEX_PAGE_SIZE });
-        const items = data?.items || [];
-        all.push(...items);
-        const totalItems = Number(data?.totalItems) || 0;
-        if (items.length < INDEX_PAGE_SIZE || (totalItems && all.length >= totalItems)) break;
-        if (p === MAX_INDEX_PAGES) truncated = true;
-      }
+      const { all, truncated } = await listWholeLibrary();
       const visible = filterVideosBySchedule(
         filterVideosByScope(all.filter(isPlayable), scope),
         schedule,
@@ -92,7 +102,10 @@ async function handler(req, res) {
         groupIds
       );
       const notesByGuid = await loadAllNotes();
-      const books = bookIndex(visible, (v) => parseReferences(notesByGuid[v.guid] || ''));
+      // Titles AND notes: a search for a book's name now passage-matches
+      // titles too (below), so a book cited only in a title is listed AND
+      // found when clicked.
+      const books = bookIndex(visible, (v) => citedIn(v, notesByGuid[v.guid]));
       return res.json({ books, truncated });
     } catch {
       return res.status(502).json({ error: 'Could not load the book list' });
@@ -117,6 +130,9 @@ async function handler(req, res) {
     // How many note/transcript matches were found but never fetched. Nonzero
     // means the answer below is incomplete in a way only this line knows.
     let unionDropped = 0;
+    // True when the title passage scan below could not read every title, so
+    // the answer may be missing matches — reported like the other caps.
+    let titleScanIncomplete = false;
     if (search) {
       const seen = new Set(found.map((v) => v.guid));
       // Notes AND transcripts, as one union. A transcript match is the same
@@ -148,6 +164,34 @@ async function handler(req, res) {
           extraGuids.map((guid) => getVideo(guid).catch(() => null))
         );
         candidates = found.concat(fetched.filter((v) => v?.guid && isPlayable(v)));
+      }
+      // A query that IS a passage ('Philippians 2') also matches TITLES citing
+      // an overlapping passage in any spelling ('Phil 1:27-2:11'). Bunny
+      // searched titles as plain text above and knows nothing about
+      // scripture, so for a passage — and only for one — every title is read
+      // and matched here. The videos arrive whole, so this costs list pages,
+      // not a round trip per match, and the union cap does not apply to it.
+      // Like every other candidate they still go through isPlayable, scope
+      // and the publish window below.
+      const passage = parsePassageQuery(search);
+      if (passage) {
+        try {
+          const { all, truncated } = await listWholeLibrary();
+          titleScanIncomplete = truncated;
+          const have = new Set(candidates.map((v) => v.guid));
+          const byTitle = all.filter(
+            (v) =>
+              v?.guid &&
+              !have.has(v.guid) &&
+              isPlayable(v) &&
+              passageMatches(parseReferences(v.title || ''), passage)
+          );
+          candidates = candidates.concat(byTitle);
+        } catch {
+          // Bunny's title matches and the note matches still answer; the
+          // missing title passages are reported, not hidden.
+          titleScanIncomplete = true;
+        }
       }
       // A note match for a video outside the requested collection would
       // quietly widen a collection filter, so honour it here too.
@@ -181,13 +225,13 @@ async function handler(req, res) {
       // Only meaningful while SEARCHING. On the unfiltered view `homeCount` is
       // the admin's display choice doing exactly what it is for, and calling
       // that "truncated" would put a warning on every ordinary page load.
-      truncated: Boolean(search) && (ordered.length > homeCount || unionDropped > 0),
+      truncated: Boolean(search) && (ordered.length > homeCount || unionDropped > 0 || titleScanIncomplete),
       // What matched, before the display cap. EXACT only when the note union
       // was not cut: the matches dropped there were never fetched, so whether
       // they would have survived the scope and schedule filters is unknown,
       // and claiming a precise total would be inventing one.
       matched: ordered.length,
-      matchedExact: unionDropped === 0,
+      matchedExact: unionDropped === 0 && !titleScanIncomplete,
     });
   } catch {
     res.status(502).json({ error: 'Video service unavailable' });

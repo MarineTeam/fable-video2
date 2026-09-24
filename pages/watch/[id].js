@@ -155,10 +155,10 @@ export default function Watch({
   saved,
   vote,
 }) {
-  // From the NOTES, not the title: in this repo titles are searched by bunny
-  // as plain text while notes are passage-matched, so only a passage read
-  // from the notes is guaranteed to find this video again when clicked.
-  const passages = parseReferences(notes || '').sort(compareReferences);
+  // From the title AND the notes. Both are passage-matched by search now
+  // (pages/api/videos.js reads every title for a passage query), so a passage
+  // read from either finds this video again when clicked.
+  const passages = parseReferences(`${video.title || ''}\n${notes || ''}`).sort(compareReferences);
   return (
     <AppShell siteName={siteName} user={user} isAdmin={admin} approved wide>
       <Link href="/" className="back-link">
