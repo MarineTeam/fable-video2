@@ -1,6 +1,9 @@
 import { withMonitorApi } from "../../lib/monitor";
 import { requireViewer } from '../../lib/guard';
 import { redis, k } from '../../lib/redis';
+import { allowRequest } from '../../lib/ratelimit';
+import { isProgressVideoId } from '../../lib/progress';
+import { saveProgress } from '../../lib/progressStore';
 
 const MAX_ITEMS = 30;
 
@@ -30,8 +33,13 @@ async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
+    // The player saves every few seconds, so this is generous for a viewer
+    // with a few tabs open and tight for anything scripted (lib/progress.js).
+    if (!(await allowRequest('progress', viewer.email, 300, 600))) {
+      return res.status(429).json({ error: 'Too many progress updates' });
+    }
     const { videoId, seconds, duration, title } = req.body || {};
-    if (typeof videoId !== 'string' || !videoId || videoId.length > 100) {
+    if (!isProgressVideoId(videoId)) {
       return res.status(400).json({ error: 'Bad videoId' });
     }
     const s = Number(seconds);
@@ -40,13 +48,12 @@ async function handler(req, res) {
       return res.status(400).json({ error: 'Bad progress values' });
     }
     try {
-      await r.hset(key, {
-        [videoId]: {
-          seconds: Math.floor(s),
-          duration: Math.floor(d),
-          title: typeof title === 'string' ? title.slice(0, 200) : '',
-          updatedAt: new Date().toISOString(),
-        },
+      // At most MAX_PROGRESS_ENTRIES videos per viewer (lib/progressStore.js).
+      await saveProgress(viewer.email, videoId, {
+        seconds: Math.floor(s),
+        duration: Math.floor(d),
+        title: typeof title === 'string' ? title.slice(0, 200) : '',
+        updatedAt: new Date().toISOString(),
       });
       return res.json({ ok: true });
     } catch {

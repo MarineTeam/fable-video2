@@ -3,6 +3,19 @@
 All notable changes to the Marine Video Portal. Dates are UTC, matching the
 commit history (`git log --oneline`).
 
+## 2026-09-24 — Bounded watch progress; delete forgets everything about a video
+
+- **Watch progress had no bounds.** `POST /api/progress` took any string up to
+  100 characters as a video id with no rate limit, so a signed-in viewer could
+  grow their own progress record without end. It now takes only a
+  video-id-shaped value, is rate-limited (300 per 10 minutes — the player
+  saves every few seconds), and each viewer's record holds at most 1,000
+  videos: a new video at the cap drops the least recently watched
+  (`lib/progress.js`, `lib/progressStore.js`). Normal saves are one Redis
+  command.
+- **Deleting a video left its watermark setting and its private invite list
+  behind.** `forgetVideo` (used by both delete paths) now clears both.
+
 ## 2026-09-24 — Access-request queue fix
 
 - **Fix: the Viewers tab's "Pending access requests" queue never loaded.**
