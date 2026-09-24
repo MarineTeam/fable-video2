@@ -17,6 +17,7 @@ import { withMonitorPage } from '../../lib/monitor';
 import { withSiteName } from '../../lib/siteNameStore';
 import SaveToListButton from '../../components/SaveToListButton';
 import RatingButtons from '../../components/RatingButtons';
+import Comments from '../../components/Comments';
 import { getMyList } from '../../lib/mylistStore';
 import { isSaved } from '../../lib/mylist';
 import { getRatings } from '../../lib/ratingsStore';
@@ -180,15 +181,17 @@ export default function Watch({
         chapters={chapters}
         showTranscript
       />
-      {notes ? (
+      {/* Shown for notes OR for passages alone: a passage can come from the
+          title, and a video with no notes must still get its links. */}
+      {notes || passages.length ? (
         <section className="card card-pad video-notes">
-          <h2 className="section-title">Notes</h2>
+          <h2 className="section-title">{notes ? 'Notes' : 'Passages'}</h2>
           {/* Plain text with line breaks preserved by CSS. React escapes text
               nodes, so there is no markup to sanitise — which is exactly why
               the field does not accept markup. */}
-          <p className="notes-body">{notes}</p>
+          {notes ? <p className="notes-body">{notes}</p> : null}
           {passages.length ? (
-            <nav className="passages" aria-label="Passages in these notes">
+            <nav className="passages" aria-label="Passages this video cites">
               {/* Each opens the library searched for that passage, which
                   finds every video whose notes cite an overlapping one. The
                   search is the ordinary scoped one, so a link can never show
@@ -208,6 +211,7 @@ export default function Watch({
           ) : null}
         </section>
       ) : null}
+      <Comments guid={video.guid} />
     </AppShell>
   );
 }

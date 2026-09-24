@@ -90,6 +90,14 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
   vote and its total are written together in one Redis step**, so they cannot disagree. *Recount ratings* on the Settings
   tab rebuilds every total from the votes, for totals written before that was true. Rating obeys group scope and the publish window exactly as watching does, and
   answers 404 rather than 403, so it cannot be used to find out which guids exist.
+- **Comments** _(viewer, watch page)_ — a discussion under each video. Anyone who can watch the video can read its comments
+  and add one (up to 1,000 characters); a comment appears at once. **Other viewers see the author's account name, never
+  their email** — the profile name, or the part of the email before the @ when the profile has none or the name is itself
+  an email address. An author can delete their own comment at any time; an owner, or anyone holding **Remove any viewer's
+  comment** (Roles tab), can remove anyone's from the same place, and that removal is in the Activity log. Staff who can
+  read the viewer list also see each author's email, so an abusive comment can be traced to an account. Comments obey group
+  scope and the publish window exactly as watching does, are rate limited per person (30 an hour), capped at 500 per video,
+  removed with the video, and shown as plain text — nothing typed becomes markup or a link.
 - **Suggested chapters** _(admin, Videos tab)_ — optionally the same transcription job asks bunny to propose chapters (a
   tick-box on the transcribe control, off by default, no extra charge). The proposal is only ever a proposal: *Suggest
   chapters* loads it **into the chapters box** to edit and save, and replacing text already there asks first. Nothing on
@@ -274,9 +282,10 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
   title itself, 100 per request, and stops at 1,000 (the same bound as Browse by book). A larger library is told the
   search was cut rather than shown a confident short list. Only the 66-book Protestant canon is read.
 - **A cut search says so** — two caps shorten a search: 25 note/transcript matches pulled in by id, then the admin's homepage count (and a passage search that could not read every title is reported the same way). Both are now reported rather than quietly returning a shorter list, because a viewer whose sermon was match 26 otherwise saw a search that confidently did not contain it. The count is only claimed when it is **exact**: matches dropped at the union cap were never fetched, so whether they would have survived the group and schedule filters is genuinely unknown, and the notice says "and there are more" rather than inventing a number.
-- **Comments are not implemented** — ratings are (above), but there is no free-text discussion anywhere in the portal. That is a deliberate stop: text other viewers can read needs moderation, reporting and a notion of who may delete whose words, none of which exists here.
+- **Comments are flat, final and quiet** — no replies or threads, no editing (delete and post again), no notification of a new one, and no "report" button or admin list of recent comments: moderation happens on the watch page itself. Not on public links or share links, whose viewers are not approved accounts.
 - **Removing a viewer leaves what was recorded about them** — removal clears their tags, roles, groups and feed token, but
-  their progress, saved list and votes stay under their email until something deletes them, and nothing does yet. Their
+  their progress, saved list, votes and comments stay until something deletes them, and nothing does yet (a moderator can
+  remove the comments by hand). Their
   votes therefore still count in the totals. The data is keyed by viewer precisely so that deleting it is one key per
   feature; deciding to do it on removal (and losing a re-added viewer's progress) is an owner call that has not been made.
 - **AI chapters are suggestions, and staying that way is the design** — bunny can generate chapters from the transcript, but nothing on that path writes to the stored list: suggestions are read back read-only (`lib/aiChapters.js`) and land in the admin's textarea, where a person accepts them. A background write would be a second writer for the same field, which is how hand-written chapters get silently replaced. **The field names bunny returns (`title`/`start`) come from its docs, not from a live job** — this has never run against a real transcription, so the reader accepts a few spellings and reports what it could not read rather than returning an empty list.

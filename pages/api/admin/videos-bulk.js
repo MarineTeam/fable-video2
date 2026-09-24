@@ -6,6 +6,7 @@ import { allowRequest } from '../../../lib/ratelimit';
 import { logAction } from '../../../lib/audit';
 import { deleteVideo, updateVideo } from '../../../lib/bunny';
 import { redis, k } from '../../../lib/redis';
+import { forgetVideo } from '../../../lib/videoCleanup';
 
 const ACTIONS = new Set(['delete', 'assign-collection']);
 const MAX_IDS = 50;
@@ -53,6 +54,10 @@ async function handler(req, res) {
       }
     } catch {}
     await pruneVideoFromGroups([...succeeded]);
+    // The same per-video cleanup as a single delete. Before this, a bulk
+    // delete left every video's schedule, chapters, notes, transcript,
+    // public flag and score behind.
+    await Promise.all([...succeeded].map((id) => forgetVideo(id)));
   }
 
   const okCount = results.filter((r) => r.ok).length;

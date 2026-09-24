@@ -10,12 +10,12 @@ import {
 } from '../../../lib/bunny';
 import { redis, k } from '../../../lib/redis';
 import { applyOrder } from '../../../lib/order';
-import { loadSchedule, clearVideoWindow } from '../../../lib/scheduleStore';
-import { loadAllChapters, clearVideoChapters } from '../../../lib/chaptersStore';
-import { loadAllNotes, clearVideoNotes } from '../../../lib/notesStore';
-import { clearVideoTranscript } from '../../../lib/captionsStore';
-import { loadPublicVideoGuids, clearVideoPublic } from '../../../lib/publicVideosStore';
-import { clearVideoRatingCounts, getRatingCounts } from '../../../lib/ratingsStore';
+import { loadSchedule } from '../../../lib/scheduleStore';
+import { loadAllChapters } from '../../../lib/chaptersStore';
+import { loadAllNotes } from '../../../lib/notesStore';
+import { loadPublicVideoGuids } from '../../../lib/publicVideosStore';
+import { getRatingCounts } from '../../../lib/ratingsStore';
+import { forgetVideo } from '../../../lib/videoCleanup';
 import { countsByVideo, countsFor, summarize } from '../../../lib/ratings';
 import { announceNewVideos } from '../../../lib/push';
 import { collectFinishedTranscripts } from '../../../lib/transcriptCollect';
@@ -124,16 +124,10 @@ async function handler(req, res) {
           await r.set(k('order'), orderRaw.filter((g) => g !== id));
         }
       } catch {}
-      // And from the publish-window hash, same no-orphans contract.
-      await clearVideoWindow(id);
-      await clearVideoChapters(id);
-      await clearVideoNotes(id);
-      // Third per-video decoration, cleared with the other two — a transcript
-      // that outlives its video is a row nothing will ever collect.
-      await clearVideoTranscript(id);
-      await clearVideoPublic(id);
-      // A recycled bunny.net guid must not inherit another video's score.
-      await clearVideoRatingCounts(id);
+      // Everything stored ABOUT the video — schedule, chapters, notes,
+      // transcript, public flag, score, comments — in one shared list, so the
+      // bulk delete forgets exactly the same things (lib/videoCleanup.js).
+      await forgetVideo(id);
       // Nor stay granted to a group — a cancelled upload is deleted here, and
       // the upload may already have ticked it into groups.
       await pruneVideoFromGroups(id);
