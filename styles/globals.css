@@ -1404,3 +1404,9 @@ button.transcript-link:focus-visible {
   margin: 0.4rem 0 0;
   font-size: 0.82rem;
 }
+
+/* Settings: the current app icon, shown as a phone would. */
+.app-icon-preview {
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--text) 11%, transparent);
+}

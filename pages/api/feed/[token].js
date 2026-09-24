@@ -10,6 +10,7 @@ import { loadAllNotes } from '../../../lib/notesStore';
 import { getSiteName } from '../../../lib/siteNameStore';
 import { emailForFeedToken, podcastEnabled } from '../../../lib/podcastStore';
 import { buildFeedXml, lowestRenditionHeight, mp4Path } from '../../../lib/podcast';
+import { getAppIconVersion } from '../../../lib/appIconStore';
 
 // The per-subscriber podcast feed. This is the ONLY route in the app that
 // authenticates with something other than an Auth0 session, because podcast
@@ -100,7 +101,9 @@ async function handler(req, res) {
     })
     .filter(Boolean);
 
+  const iconVersion = await getAppIconVersion().catch(() => null);
   const xml = buildFeedXml({
+    imageUrl: iconVersion ? `${base}/api/app-icon/512?v=${iconVersion}` : `${base}/icon-512.png`,
     title: siteName,
     description: `Recordings from ${siteName}. This feed is private to you — please don't share the link.`,
     siteUrl: base,
