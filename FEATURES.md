@@ -141,7 +141,7 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
   Chrome desktop, up to a day or so for an Android WebAPK, and not until re-adding on iOS.
 - **Admin-adjustable color palette** _(admin)_ — 7 presets plus custom hex colors, applied to **all** visitors; cached client-side with a no-flash pre-paint script so returning visitors never see a color flicker.
 - **Video thumbnails** — the homepage upgrades to a responsive **thumbnail grid** (16:9 cards with a play overlay) when thumbnails are configured, and falls back to a clean title list otherwise. The admin library shows thumbnails too. Thumbnail URLs are **CDN token-signed** so they work with "Block Direct URL File Access" enabled.
-- **Search** — viewers can search the whole library by title (debounced).
+- **Search** — viewers can search the whole library (debounced): titles, notes and transcripts in every language, by passage and by word form (see Chapters, Notes, Transcript and the two search entries above).
 - **Collections / categories** — filter the homepage by collection via chips.
 - **Resume playback & Continue-watching** — videos remember where each viewer left off (via player.js); the homepage shows a Continue-watching strip with progress bars. Degrades gracefully if the player protocol is unavailable.
 - **Admin-adjustable video count** _(admin)_ — hard cap enforced in code (bunny.net's API doesn't honor it as a strict limit).
@@ -159,7 +159,7 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - **Upload directly from the browser to bunny.net** — TUS resumable upload with a progress bar, **drag-and-drop**, and **cancel/retry** for in-progress uploads (a cancelled upload cleans up its half-created video). The Bunny API key never reaches the client.
 - **Encoding status** — per-video "Processing %" / "Failed" badges, auto-refreshing while anything is encoding.
 - **Rename** videos inline.
-- **Delete** videos (removes from bunny.net and prunes them from the saved order).
+- **Delete** videos — removes them from bunny.net and forgets everything stored about them here (order, schedule, chapters, notes, transcript, public flag, rating totals, comments, group scopes), for single and bulk delete alike (`lib/videoCleanup.js`), so a recycled guid never inherits another video's data.
 - **Bulk video operations** — multi-select any number of videos and **bulk delete** or **bulk assign to a collection** in one action, mirroring the bulk-share UX: every video is processed independently, so one failure never blocks the rest, and per-video success/failure is reported. Bulk delete also prunes the saved order in one pass (capped at 50 videos per action).
 - **Drag-to-reorder** the library.
 - **Search/filter** the library.
@@ -254,7 +254,14 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - Share expiry is a logical field (`expiresAt`), not raw Redis TTL — a link's own Redis record actually outlives its expiry by a 60-day grace window so an already-lapsed-but-not-revoked link can still be **extended**. All read paths (the share page, playback events, the bundle page) check `expiresAt`/`revokedAt` explicitly rather than relying on the record simply being gone.
 - **Opt-in Sentry error monitoring** — modern instrumentation-file setup (client/server/edge); inert until `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` are set.
 - **CI pipeline** — GitHub Actions runs lint + tests + build on every push/PR to `main`, catching breakage before Vercel deploys.
-- **Smoke tests** — Vitest coverage for the auth check, video-ordering logic, theme helpers, push logic, share/bundle logic, watermark precedence, the per-video analytics rollup, and the Private list isolation guarantee.
+- **Tests** — over 900 Vitest tests: the pure rules (search, scripture,
+  stems, schedules, comments, ratings, captions), every API route's gate, and
+  the Lua scripts run against a **real redis-server** (CI installs one; locally
+  those suites skip without it). New tests are checked by breaking the code
+  they cover and confirming they fail.
+- **Scheduled jobs** — a Vercel cron (`vercel.json`) runs the transcript
+  collector daily; off until `CRON_SECRET` is set, and gated by that secret
+  alone (see Configuration).
 - **Query Monitor performance panel** — an opt-in floating widget, visible to signed-in users, showing Redis query count/time, outbound bunny.net/Resend/web-push call count/time, SSR cost, client render time, and process memory/uptime, with a per-request breakdown on click. Gated entirely behind `QUERY_MONITOR_ENABLED` (see Configuration knobs below); off by default with no instrumentation overhead.
 - **Clean up stale items** _(admin, Shares tab)_ — sweeps shares whose record has aged past its grace window and bundles whose every member share has since expired or been revoked, so an emptied bundle doesn't sit around indefinitely after its last live item is gone.
 
