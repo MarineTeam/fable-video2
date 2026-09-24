@@ -3,6 +3,74 @@
 All notable changes to the Marine Video Portal. Dates are UTC, matching the
 commit history (`git log --oneline`).
 
+## 2026-09-24 — Search, scheduling, transcripts, comments (#26)
+
+**Deploy note:** set `CRON_SECRET` (16+ random characters) in Vercel to switch
+on the scheduled transcript collector. Without it `/api/cron/transcripts`
+answers 404, and transcripts are still collected when an admin opens the
+Videos tab. The schedule in the new `vercel.json` is daily, because Vercel's
+Hobby plan refuses anything more frequent; on Pro it can be `*/15 * * * *`.
+No data migration.
+
+- **Comments under videos.** Anyone who can watch a video can read and add
+  comments; a comment appears at once. Other viewers see the author's account
+  name, never their email. An author can delete their own; an owner or the new
+  **Remove any viewer's comment** capability (`comments.manage`) can remove
+  anyone's, audited. Gated like watching, rate limited 30 an hour, capped at
+  500 per video, and on the deny-by-default route-guard list.
+- **Per-group publish windows** (early or extended access for a group; they
+  only ever add time) and **repeating weekly windows** ("Sundays
+  09:00–13:00", in the zone the rule was saved in).
+- **Search by passage** in notes **and titles**: bunny searches titles as plain
+  text, so for a query that is a passage the route reads every title (up to
+  1,000) and matches it. **Browse by book** counts titles too, and the watch
+  page's passage links read the title.
+- **Search by word form** in notes ("baptism" finds "baptized"), **search in
+  every transcript language** (translations matched inside Redis, ids only),
+  and a search cut short now says so.
+- **Scheduled transcript collection** (`/api/cron/transcripts`); a queued job
+  now waits three days, not one, before being given up.
+- **Link to a moment** (`?t=`), **choosing groups at upload**, **podcast episode
+  artwork**, an **admin-set app icon** (also on push notifications), and atomic
+  **ratings** with a recount.
+- **Fixed:** the schedule editor sent the typed date text, which the server
+  read as UTC — an admin in California typing 09:00 got 02:00 their time.
+  Dates are now converted in the browser.
+- **Fixed:** the bulk delete cleared none of a video's stored data (schedule,
+  chapters, notes, transcript, public flag, rating totals). Both delete paths
+  now share `lib/videoCleanup.js`, which also removes comments.
+- **Fixed:** deleting a collection now also clears it from the group scopes
+  that granted it.
+
+## 2026-09-19 — Transcripts, My List, AI chapter suggestions, ratings, group membership (#25)
+
+- **Transcripts** from bunny.net's Transcribe AI under the player, with
+  clickable timestamps. The route returns the text, never the caption URL.
+- **My List**, a per-viewer saved queue.
+- **AI chapter suggestions** that propose but never write.
+- **Rating a video** (👍 / 👎): a viewer sees only their own vote; totals go to
+  staff.
+- **Group membership is gated on `viewers.read`.** Member addresses and the
+  whole email → groups map were going to any holder of `groups.manage`, and
+  membership could be written for an address with no account.
+- **Fixed:** the caption sanitizer let an unterminated tag survive one pass.
+
+## 2026-09-19 — Strict request-parameter readers (#24)
+
+- **`lib/params.js` ported from fable-video** and adopted in nine admin call
+  sites. The checks it replaces let wrong types through: `String(x || '')`
+  accepts `true` and `{}`, and `String(['abcdef1234'])` passes a guid regex.
+  Wrong-typed values are now rejected, not coerced.
+
+## 2026-09-17/18 — Pre-paint palette hardening (#22, #23)
+
+- The pre-paint theme script now checks each cached colour is 6-digit hex
+  before applying it, instead of trusting localStorage.
+- The constants interpolated into that inline script are escaped with
+  `jsLiteral()`: `JSON.stringify` alone leaves `</script>` and U+2028/U+2029
+  able to break out. Nothing was exploitable (both values are constants); the
+  same pattern drew CodeQL alert #7 in fable-video.
+
 ## 2026-09-17 — Security audit fixes
 
 - **`/api/share-event` was returning 500 to every authenticated caller.** The
