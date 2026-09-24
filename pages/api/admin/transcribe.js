@@ -5,7 +5,11 @@ import { isExplicitlyTrue, oneTrimmed } from '../../../lib/params';
 import { allowRequest } from '../../../lib/ratelimit';
 import { fetchCaptionVtt, getVideo, transcribeVideo } from '../../../lib/bunny';
 import { parseVtt } from '../../../lib/captions';
-import { setVideoTranscript } from '../../../lib/captionsStore';
+import {
+  clearTranscribePending,
+  markTranscribePending,
+  setVideoTranscript,
+} from '../../../lib/captionsStore';
 import { logAction } from '../../../lib/audit';
 import { suggestedChapters } from '../../../lib/aiChapters';
 
@@ -82,6 +86,13 @@ async function handler(req, res) {
     return res.status(502).json({ error: 'Could not queue transcription' });
   }
 
+  // Recorded so the admin video list can collect the result without a second
+  // click. Best-effort AT THE CALL SITE as well as inside the store: the money
+  // has already been spent by this line, so a bookkeeping failure must not be
+  // reported as a failed transcription — the admin would re-click and pay
+  // twice for the same minutes.
+  await markTranscribePending(guid).catch(() => {});
+
   await logAction(
     admin,
     force ? 'video.retranscribe' : 'video.transcribe',
@@ -148,6 +159,10 @@ async function ingest(res, admin, guid) {
 
   const result = await setVideoTranscript(guid, cues);
   if (!result.ok) return res.status(502).json({ error: result.error });
+
+  // Collected, one way or another — nothing left to wait for. Guarded for the
+  // same reason: the transcript is already stored by this line.
+  await clearTranscribePending(guid).catch(() => {});
 
   await logAction(admin, 'video.transcript_ingest', `${guid} (${chosen}, ${cues.length})`);
   return res.json({ ok: true, ready: true, cues: cues.length, language: chosen });

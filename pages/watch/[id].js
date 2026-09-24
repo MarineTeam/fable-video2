@@ -7,8 +7,7 @@ import { trustedEmail } from '../../lib/auth';
 import { redis, k } from '../../lib/redis';
 import { viewerAccessFor } from '../../lib/guard';
 import { contentScopeFor, isVideoVisible } from '../../lib/groups';
-import { isWithinWindow } from '../../lib/schedule';
-import { getVideoWindow } from '../../lib/scheduleStore';
+import { isVideoInWindowFor } from '../../lib/scheduleStore';
 import { getVideoChapters } from '../../lib/chaptersStore';
 import { getVideoNotes } from '../../lib/notesStore';
 import { getVideo, signedEmbedUrl } from '../../lib/bunny';
@@ -18,12 +17,16 @@ import { withMonitorPage } from '../../lib/monitor';
 import { withSiteName } from '../../lib/siteNameStore';
 import SaveToListButton from '../../components/SaveToListButton';
 import RatingButtons from '../../components/RatingButtons';
+import Comments from '../../components/Comments';
 import { getMyList } from '../../lib/mylistStore';
 import { isSaved } from '../../lib/mylist';
 import { getRatings } from '../../lib/ratingsStore';
 import { ratingOf } from '../../lib/ratings';
+import { parseTimeParam } from '../../lib/timestampLink';
+import { compareReferences, formatReference, parseReferences } from '../../lib/scripture';
+import { passageSearchHref } from '../../lib/searchLink';
 
-async function gssp({ req, res, params }) {
+async function gssp({ req, res, params, query }) {
   const id = String(params.id || '');
   if (!/^[0-9a-f-]{10,64}$/i.test(id)) return { notFound: true };
 
@@ -66,7 +69,7 @@ async function gssp({ req, res, params }) {
 
   // Publish window, the direct-URL half of the same gate applied to the list in
   // /api/videos. Staff bypass it so they can preview what they scheduled.
-  if (!admin && !isWithinWindow(await getVideoWindow(video.guid))) {
+  if (!admin && !(await isVideoInWindowFor(video.guid, email))) {
     return { redirect: { destination: '/', permanent: false } };
   }
 
@@ -79,6 +82,15 @@ async function gssp({ req, res, params }) {
       initialTime = Number(parsed.seconds);
     }
   } catch {}
+
+  // A ?t= in the address is an explicit request for a moment, so it beats the
+  // saved resume position — the viewer followed a link to a point, and
+  // sending them to where they last stopped would ignore what they clicked.
+  // Null (not 0) when it cannot be read, so a mangled link leaves resume
+  // alone rather than silently restarting the video.
+  const requested = parseTimeParam(query?.t);
+  const startExplicit = requested !== null;
+  if (startExplicit) initialTime = requested;
 
   redis()
     .hset(k('viewer:lastseen'), { [email]: new Date().toISOString() })
@@ -118,6 +130,7 @@ async function gssp({ req, res, params }) {
       // Signed fresh on every request — never a permanent URL.
       embedUrl: signedEmbedUrl(video.guid),
       initialTime,
+      startExplicit,
       watermark,
       chapters,
       notes,
@@ -135,6 +148,7 @@ export default function Watch({
   video,
   embedUrl,
   initialTime,
+  startExplicit,
   watermark,
   siteName,
   chapters,
@@ -142,6 +156,10 @@ export default function Watch({
   saved,
   vote,
 }) {
+  // From the title AND the notes. Both are passage-matched by search now
+  // (pages/api/videos.js reads every title for a passage query), so a passage
+  // read from either finds this video again when clicked.
+  const passages = parseReferences(`${video.title || ''}\n${notes || ''}`).sort(compareReferences);
   return (
     <AppShell siteName={siteName} user={user} isAdmin={admin} approved wide>
       <Link href="/" className="back-link">
@@ -156,21 +174,44 @@ export default function Watch({
         embedUrl={embedUrl}
         videoId={video.guid}
         initialTime={initialTime}
+        startExplicit={startExplicit}
         title={video.title}
         watermark={watermark}
         watermarkLabel={user.email}
         chapters={chapters}
         showTranscript
       />
-      {notes ? (
+      {/* Shown for notes OR for passages alone: a passage can come from the
+          title, and a video with no notes must still get its links. */}
+      {notes || passages.length ? (
         <section className="card card-pad video-notes">
-          <h2 className="section-title">Notes</h2>
+          <h2 className="section-title">{notes ? 'Notes' : 'Passages'}</h2>
           {/* Plain text with line breaks preserved by CSS. React escapes text
               nodes, so there is no markup to sanitise — which is exactly why
               the field does not accept markup. */}
-          <p className="notes-body">{notes}</p>
+          {notes ? <p className="notes-body">{notes}</p> : null}
+          {passages.length ? (
+            <nav className="passages" aria-label="Passages this video cites">
+              {/* Each opens the library searched for that passage, which
+                  finds every video whose notes cite an overlapping one. The
+                  search is the ordinary scoped one, so a link can never show
+                  a viewer something new. */}
+              <span className="passages-label">Passages</span>
+              <div className="chips">
+                {passages.map((ref) => {
+                  const label = formatReference(ref);
+                  return (
+                    <Link key={label} href={passageSearchHref(label)} className="chip passage-chip">
+                      {label}
+                    </Link>
+                  );
+                })}
+              </div>
+            </nav>
+          ) : null}
         </section>
       ) : null}
+      <Comments guid={video.guid} />
     </AppShell>
   );
 }

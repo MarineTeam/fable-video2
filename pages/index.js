@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import AppShell from '../components/AppShell';
 import { PlayIcon, SearchIcon, ChevronLeftIcon, ChevronRightIcon } from '../components/icons';
 import { auth0 } from '../lib/auth0';
@@ -9,6 +10,7 @@ import { viewerAccessFor } from '../lib/guard';
 import { isGeoAllowed } from '../lib/geo';
 import { withMonitorPage } from '../lib/monitor';
 import { withSiteName } from '../lib/siteNameStore';
+import { linkedQuery } from '../lib/searchLink';
 
 async function gssp({ req, res }) {
   const session = await auth0.getSession(req, res);
@@ -68,11 +70,46 @@ export default function Home({ user, isAdmin: admin, approved, geoBlocked, unver
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(1);
+  // Whether the search stopped early, and what it saw before the cap. See
+  // pages/api/videos.js — both caps on that path are reported rather than
+  // silently shortening the answer.
+  const [cut, setCut] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [savedIds, setSavedIds] = useState([]);
   const [queryInput, setQueryInput] = useState('');
   const [query, setQuery] = useState('');
+  // "Browse by book". Fetched only when the viewer first OPENS the list: the
+  // index pages through the whole library at bunny, which an ordinary page
+  // load should not pay for. 'idle' | 'loading' | 'error' | 'ready'.
+  const [booksState, setBooksState] = useState('idle');
+  const [books, setBooks] = useState([]);
+  const [booksTruncated, setBooksTruncated] = useState(false);
+  const loadBooks = (e) => {
+    if (!e.currentTarget.open || booksState === 'loading' || booksState === 'ready') return;
+    setBooksState('loading');
+    fetch('/api/videos?index=books')
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d) => {
+        setBooks(d?.books || []);
+        setBooksTruncated(Boolean(d?.truncated));
+        setBooksState('ready');
+      })
+      // A failure says so and can be retried by closing and reopening; it is
+      // never shown as "no passages", which would be a false statement.
+      .catch(() => setBooksState('error'));
+  };
+  const router = useRouter();
+
+  // A link can open the library already searched — the watch page's passage
+  // links do. Read once the router has the URL, and applied to both states
+  // so the results load without waiting out the typing debounce.
+  const linked = router.isReady ? linkedQuery(router.query.q) : '';
+  useEffect(() => {
+    if (!linked) return;
+    setQueryInput(linked);
+    setQuery(linked);
+  }, [linked]);
   const [collections, setCollections] = useState([]);
   const [activeCollection, setActiveCollection] = useState('');
   const [progress, setProgress] = useState([]);
@@ -140,6 +177,11 @@ export default function Home({ user, isAdmin: admin, approved, geoBlocked, unver
       setVideos(data.videos || []);
       setTotal(data.total || 0);
       setPages(data.pages || 1);
+      setCut(
+        data.truncated
+          ? { shown: data.total || 0, matched: data.matched || 0, exact: data.matchedExact !== false }
+          : null
+      );
     } catch {
       setError('Could not load the library. Try again in a moment.');
     } finally {
@@ -281,6 +323,19 @@ export default function Home({ user, isAdmin: admin, approved, geoBlocked, unver
         </section>
       ) : null}
 
+      {/* Said plainly rather than shown as a shorter list: a viewer whose
+          sermon was match 26 would otherwise see a search that confidently
+          did not contain it. The count is only claimed when it is exact —
+          when the note/transcript union was cut, the dropped matches were
+          never fetched, so their number is genuinely unknown. */}
+      {cut ? (
+        <div className="notice">
+          {cut.exact
+            ? `Showing the first ${cut.shown} of ${cut.matched} matches — narrow the search to see the rest.`
+            : `Showing the first ${cut.shown} matches, and there are more — narrow the search to see them.`}
+        </div>
+      ) : null}
+
       <div className="library-head">
         <h1>Library {total ? <span className="muted">({total})</span> : null}</h1>
         <div className="searchbar">
@@ -295,6 +350,43 @@ export default function Home({ user, isAdmin: admin, approved, geoBlocked, unver
           />
         </div>
       </div>
+
+      <details className="book-browse" onToggle={loadBooks}>
+        <summary>Browse by book</summary>
+        {booksState === 'ready' && books.length > 0 ? (
+          <div className="chips">
+            {books.map(({ book, count }) => (
+              <button
+                key={book}
+                type="button"
+                className={query === book ? 'chip active' : 'chip'}
+                // The name alone is read as the whole book by the passage
+                // search, which matches the same notes this was counted from.
+                onClick={() => {
+                  setQueryInput(book);
+                  setQuery(book);
+                  setPage(1);
+                }}
+              >
+                {book} <span className="book-count">{count}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="muted book-empty">
+            {booksState === 'loading'
+              ? 'Loading…'
+              : booksState === 'error'
+                ? 'Could not load the book list — close and reopen to try again.'
+                : booksState === 'ready'
+                  ? 'No passages cited in notes yet.'
+                  : null}
+          </p>
+        )}
+        {booksTruncated ? (
+          <p className="muted book-empty">Counted from the first 1,000 videos.</p>
+        ) : null}
+      </details>
 
       {collections.length > 0 ? (
         <div className="chips">

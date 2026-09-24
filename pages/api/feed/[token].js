@@ -5,11 +5,12 @@ import { redis, k } from '../../../lib/redis';
 import { applyOrder } from '../../../lib/order';
 import { contentScopeFor, filterVideosByScope } from '../../../lib/groups';
 import { filterVideosBySchedule } from '../../../lib/schedule';
-import { loadSchedule } from '../../../lib/scheduleStore';
+import { loadSchedule, viewerGroupIds } from '../../../lib/scheduleStore';
 import { loadAllNotes } from '../../../lib/notesStore';
 import { getSiteName } from '../../../lib/siteNameStore';
 import { emailForFeedToken, podcastEnabled } from '../../../lib/podcastStore';
 import { buildFeedXml, lowestRenditionHeight, mp4Path } from '../../../lib/podcast';
+import { getAppIconVersion } from '../../../lib/appIconStore';
 
 // The per-subscriber podcast feed. This is the ONLY route in the app that
 // authenticates with something other than an Auth0 session, because podcast
@@ -54,11 +55,12 @@ async function handler(req, res) {
 
   const r = redis();
   const isStaff = owner || staff;
-  const [countRaw, orderRaw, scope, schedule, notesByGuid, siteName] = await Promise.all([
+  const [countRaw, orderRaw, scope, schedule, groupIds, notesByGuid, siteName] = await Promise.all([
     r.get(k('settings:homeCount')).catch(() => null),
     r.get(k('order')).catch(() => null),
     contentScopeFor(email, { staff: isStaff }),
     isStaff ? Promise.resolve({}) : loadSchedule(),
+    isStaff ? Promise.resolve([]) : viewerGroupIds(email),
     loadAllNotes(),
     getSiteName(),
   ]);
@@ -70,7 +72,9 @@ async function handler(req, res) {
     const data = await listVideos({ page: 1, perPage: Math.min(homeCount, 100) });
     videos = filterVideosBySchedule(
       filterVideosByScope((data?.items || []).filter(isPlayable), scope),
-      schedule
+      schedule,
+      Date.now(),
+      groupIds
     );
   } catch {
     return res.status(502).json({ error: 'Video service unavailable' });
@@ -89,6 +93,9 @@ async function handler(req, res) {
         title: v.title || 'Untitled',
         guid: v.guid,
         enclosureUrl,
+        // A stable address on this app, re-checked per fetch — see
+        // pages/api/feed/[token]/[file].js for why art is not a signed URL.
+        imageUrl: `${base}/api/feed/${encodeURIComponent(String(req.query.token || ''))}/${encodeURIComponent(v.guid)}.jpg`,
         link: `${base}/watch/${v.guid}`,
         pubDate: v.dateUploaded,
         description: notesByGuid[v.guid] || '',
@@ -97,7 +104,9 @@ async function handler(req, res) {
     })
     .filter(Boolean);
 
+  const iconVersion = await getAppIconVersion().catch(() => null);
   const xml = buildFeedXml({
+    imageUrl: iconVersion ? `${base}/api/app-icon/512?v=${iconVersion}` : `${base}/icon-512.png`,
     title: siteName,
     description: `Recordings from ${siteName}. This feed is private to you — please don't share the link.`,
     siteUrl: base,

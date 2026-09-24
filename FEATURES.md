@@ -35,7 +35,8 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
   plain text rather than becoming buttons that do nothing.
 - **Notes** _(admin, Videos tab)_ — free text per video, shown under the player and **matched by viewer search**, so a talk
   can be found by what it covered rather than only by its title. Search is a union: Bunny still runs the title search across
-  the whole library, and videos whose notes match are added by id (capped per search). Every candidate goes through the same
+  the whole library, and videos whose notes match are added by id (capped per search — **and the cap is reported**, see
+  below). Every candidate goes through the same
   access pipeline, so a note match can never surface a video a viewer may not see. Rendered as plain text with line breaks
   preserved — no markup is accepted, which is why none needs sanitising.
 - **My list** _(viewers)_ — save a video to come back to. A toggle beside the title on the watch page, and a "My list" row at
@@ -47,19 +48,56 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - **Transcript** _(admin, Videos tab → viewers, under the player)_ — bunny.net transcribes the audio and viewers get the
   spoken text under the player, collapsed by default. Every line carries the timestamp it was said at and clicking one seeks
   there — a chapter at the resolution of a sentence. A search box inside the panel filters to matching lines, and the
+  **every language bunny produced is kept**, with a picker in the panel when there is more than one — translation is billed
+  per language, so ingesting only one would mean paying for tracks nobody could read, and a language the video does not have
+  is reported rather than quietly answered with another. **Search reads every language too**: searching in Spanish finds the
+  sermon whose Spanish translation says it. Translations are searched inside Redis, which hands back only the matching video
+  ids, so a library of many-language sermons does not make every search load every translation. The
   **library search matches what was said**, joining the same union as notes above and obeying the same cap and the same
   access pipeline, so a transcript match can never surface a video a viewer may not see. **Transcribing costs money**
   (bunny bills about $0.10 per minute of video), so the price is printed on the admin control. Two clicks, not one, because
-  bunny's transcription is asynchronous: *Transcribe* queues it, *Fetch captions* pulls the result in a few minutes later.
+  bunny's transcription is asynchronous — but **one click, not two**: queueing records the video, and both the admin Videos tab and a **scheduled job** collect whatever bunny has finished since, so a transcript no longer waits for an admin to come back. *Fetch captions* still works for anyone who wants it now. The job is inert until `CRON_SECRET` is set (see Configuration); it runs daily, which every Vercel plan allows, and can run every 15 minutes on Pro. Before this, forgetting the second click left a video that had really been transcribed and paid for, with no transcript and nothing saying why.
   A video that was never transcribed shows no panel at all, and the public watch page never shows one — its visitors are
   signed out, and the transcript endpoint requires an approved viewer.
+- **Search finds other forms of a word** _(viewer)_ — in notes, "baptism" finds "baptised", "baptized" and
+  "baptizing"; "forgiving" finds "forgiveness". Every word of a multi-word search must appear somewhere in the notes, in
+  any order. It only ever **adds** matches, and it is deliberately cautious: endings that are also ordinary letters
+  ("-er", "-en") are left alone so "Peter" never finds "pet", and words match whole. A search that is a Bible passage is
+  answered by the passage alone. Titles are searched by bunny as plain text, and transcripts stay plain text too (stemming
+  tens of kilobytes per video on every search is a cost the search box cannot carry).
+- **Search by passage** _(viewer)_ — searching for a Bible passage finds every video whose **title or notes** cite an
+  **overlapping** passage, however it was written: "Philippians 2" finds "Phil 1:27–2:11", and "Philippians" finds
+  "Php 4:13". bunny's own title search is plain text, so for a query that is a passage — and only then — every title is
+  read and passage-matched here (up to 1,000 videos; past that the search says it was cut). Book names, common abbreviations, numbered books ("1 Cor", "First John", "II Tim"), cross-chapter
+  ranges and verse lists are read, and it only ever **adds** matches. Under the notes on the watch page, the passages the title
+  and notes cite appear as links that open the library searched for that passage. **Browse by book** on the homepage (collapsed,
+  and only loaded when opened — it pages through the whole library at bunny) lists every book the viewer's titles and notes cite,
+  with how many videos cite it; clicking one searches that book. Counted after the same playable, group and schedule
+  filters as the list, since a count is itself information; a library past 1,000 videos says it was cut. Cautious about inventing references: a book name
+  needs a chapter number and a capital letter, the chapter must exist in that book, and an abbreviation typed on its own
+  ("phil") is not read as a book.
+- **Link to a moment** _(viewer, watch page)_ — a *Copy link at 24:15* button under the player copies the page address with the
+  current position on it, and opening a link with `?t=` starts there. An explicit timestamp **beats the saved resume
+  position**: the viewer followed a link to a point, and sending them where they last stopped would quietly ignore what they
+  clicked. A value that is not a timestamp is ignored rather than read as 0:00, so a mangled link leaves resume alone instead
+  of dropping them at the start. Reads plain seconds, `1:30`, `1:02:03` and `1h2m3s`. Works on the share and public watch
+  pages too, since the button copies whatever address the player is already on.
 - **Rate a video** _(viewer, watch page)_ — 👍 or 👎 beside the title; pressing the vote you already hold clears it, which is
   the only way to take one back. **A viewer sees their own vote and nobody else's** — the totals go to staff, on the admin
   Videos tab, never to viewers. In a library watched by a few dozen people a visible "2 down" on someone's teaching is a
   social problem the product does not need, and at that size a public counter is close to attributable anyway. The vote is
-  stored under the viewer's own key (`ratings:{email}`), so removing a viewer removes their votes with them; the totals are
-  plain integers holding no address at all. Rating obeys group scope and the publish window exactly as watching does, and
+  stored under the viewer's own key (`ratings:{email}`); the totals are plain integers holding no address at all, and **the
+  vote and its total are written together in one Redis step**, so they cannot disagree. *Recount ratings* on the Settings
+  tab rebuilds every total from the votes, for totals written before that was true. Rating obeys group scope and the publish window exactly as watching does, and
   answers 404 rather than 403, so it cannot be used to find out which guids exist.
+- **Comments** _(viewer, watch page)_ — a discussion under each video. Anyone who can watch the video can read its comments
+  and add one (up to 1,000 characters); a comment appears at once. **Other viewers see the author's account name, never
+  their email** — the profile name, or the part of the email before the @ when the profile has none or the name is itself
+  an email address. An author can delete their own comment at any time; an owner, or anyone holding **Remove any viewer's
+  comment** (Roles tab), can remove anyone's from the same place, and that removal is in the Activity log. Staff who can
+  read the viewer list also see each author's email, so an abusive comment can be traced to an account. Comments obey group
+  scope and the publish window exactly as watching does, are rate limited per person (30 an hour), capped at 500 per video,
+  removed with the video, and shown as plain text — nothing typed becomes markup or a link.
 - **Suggested chapters** _(admin, Videos tab)_ — optionally the same transcription job asks bunny to propose chapters (a
   tick-box on the transcribe control, off by default, no extra charge). The proposal is only ever a proposal: *Suggest
   chapters* loads it **into the chapters box** to edit and save, and replacing text already there asks first. Nothing on
@@ -77,10 +115,19 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
   offers, and a service is still a large download. The feed URL is a bearer credential (podcast apps cannot log in), so the
   UI says to treat it like a password and "New link" revokes the old one immediately. Access is re-checked on every fetch,
   items obey groups and publish windows, and removing a viewer revokes their feed. Inert without `BUNNY_CDN_HOSTNAME`, and
-  needs MP4 Fallback enabled on the Bunny library.
+  needs MP4 Fallback enabled on the Bunny library. **Each episode shows its own thumbnail** as artwork (a custom one when
+  set on bunny.net), served from a stable address on this app that is re-checked like the feed on every fetch — so art
+  disappears with access, and apps are not handed an expiring bunny.net link to cache. Thumbnails are 16:9 while podcast
+  apps expect square art, so some apps crop them.
 - **Access-request notifications** — a genuinely new request emails and pushes everyone holding `viewers.manage`, addressed
   by capability rather than a hardcoded list. A re-ask while one is pending does not re-notify, and a notification failure
   never fails the request itself.
+- **Adjustable app icon** _(admin, Settings tab)_ — choose any image and it becomes the home-screen icon for new installs,
+  the iOS icon and the podcast cover, with no redeploy. It is cropped to a square from the centre and resized in the
+  browser; the server re-checks every size is a PNG of exactly that size before storing it — never an SVG, which could
+  carry script. **Reset to default** brings the built-in icon back. Installed apps pick it up when their browser next
+  re-checks the manifest. Push notifications show it too; only the notification badge (drawn by Android as a one-colour silhouette) stays built-in, and a custom icon is offered to Android as a
+  plain icon rather than a "maskable" one, since an arbitrary image has no guaranteed safe zone.
 - **Adjustable site name** _(admin, Settings tab)_ — the portal's display name, editable live with no redeploy.
   Applies to the header on every page, the recipient-facing share/bundle shell, the browser tab title, and the PWA
   manifest (so an installed app carries it too). Resolved **server-side** and passed through page props rather than
@@ -154,7 +201,7 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - **Approved viewer management** — add/remove emails, with **bulk add** (paste comma/space/newline-separated lists; validated + deduped).
 - **Viewer last-seen** — each viewer's most recent activity time.
 - **Viewer tags/groups** _(admin, Viewers tab)_ — tag any approved viewer with free-text labels (e.g. "Team A") to group them, instead of the list staying a flat set of emails. Add/remove a tag on one viewer inline (chip editor per row), or multi-select viewers and **tag/untag the selection** in one action — every email is processed independently, so one failure never blocks the rest (mirrors the bulk-share/bulk-video-ops idiom). A **filter-by-tag** dropdown narrows the list to one group. Tags are purely a grouping label — they don't themselves grant access — but they let **bulk-share and the single-share form** target a group by picking its tag instead of pasting emails one at a time (see Private share links above), and removing a viewer outright also clears their tags. Capped at 20 tags per viewer, 40 characters per tag.
-- **Groups** _(admin, Groups tab)_ — named, managed groups of viewers, distinct from the free-text tags above: a group has a member list and an optional **content scope** (collections and/or individual videos). Membership is editable from either direction (tick members on the group, or set a person's groups). Whether a scope restricts anything is a deployment decision — with `GROUP_CONTENT_GATING` unset (the default) groups are membership bookkeeping and nobody's library changes; set to `1`, a member sees exactly the union of their groups' collections and videos, enforced at all three points that have to agree (the homepage list, the collection filters, and direct `/watch/…` links). Groups **restrict, they do not grant**: a group scoped to nothing shows its members an empty library, and the tab warns before you save one. A viewer in no group is governed by a live setting (whole library by default, so enabling the flag never silently blanks anyone). Owners and role-holders always bypass gating, share links are never gated, and removing a viewer clears their memberships. Capped at 100 groups, 20 groups per viewer. **Only approved viewers can be put in a group** — an address that is not on the viewer list is reported back, not written, the same rule tagging has always followed; an existing member whose approval lapsed is kept rather than evicted by an unrelated save, since removing somebody should be a decision, not a side effect. Membership needs `viewers.read` as well as `groups.manage` (it names people); the registry and the scopes need only `groups.manage`.
+- **Groups** _(admin, Groups tab)_ — named, managed groups of viewers, distinct from the free-text tags above: a group has a member list and an optional **content scope** (collections and/or individual videos). Membership is editable from either direction (tick members on the group, or set a person's groups). Whether a scope restricts anything is a deployment decision — with `GROUP_CONTENT_GATING` unset (the default) groups are membership bookkeeping and nobody's library changes; set to `1`, a member sees exactly the union of their groups' collections and videos, enforced at all three points that have to agree (the homepage list, the collection filters, and direct `/watch/…` links). Groups **restrict, they do not grant**: a group scoped to nothing shows its members an empty library, and the tab warns before you save one. A viewer in no group is governed by a live setting (whole library by default, so enabling the flag never silently blanks anyone). Owners and role-holders always bypass gating, share links are never gated, and removing a viewer clears their memberships. Capped at 100 groups, 20 groups per viewer. Deleting a collection removes it from every group that granted it, so a scope never names something that no longer exists. **A single upload can be granted as it is created**: the upload zone lists the groups (for someone holding `groups.manage` — uploading alone does not let you grant access), and files dropped while groups are ticked are added to their scopes. Nothing is ticked by default and there is no stored default group, deliberately. A group that no longer exists, or already holds its 500-entry maximum, is refused before the video is created; a grant that fails afterwards is named on the upload row rather than failing the upload. Deleting a video — singly, in bulk, or by cancelling its upload — now also clears it from every group that granted it. **Only approved viewers can be put in a group** — an address that is not on the viewer list is reported back, not written, the same rule tagging has always followed; an existing member whose approval lapsed is kept rather than evicted by an unrelated save, since removing somebody should be a decision, not a side effect. Membership needs `viewers.read` as well as `groups.manage` (it names people); the registry and the scopes need only `groups.manage`.
 - **Activity / audit log** — the most recent admin actions (viewer add/remove, viewer tag/untag including bulk actions, share create/resend/extend/revoke/unrevoke/purge including bulk actions, private-list add/remove, video rename/delete, collection create/delete, role create/update/delete/assign, group create/update/delete/membership, settings, palette), each with actor and time. Logging is best-effort so it never breaks the underlying action.
 - **Analytics dashboard** — total views, 30-day views, watch time, video count, a 30-day views bar chart, and a most-watched list (from bunny.net video stats + the statistics API), plus a **Share performance by video** list (shares, recipients, views, started, completed, completion rate, avg progress — see Video management above for the same rollup as a per-video collapsible panel).
 - **Scheduled publish/expiry** _(admin, Videos tab)_ — per-video publish windows: hide a video until a date, after a
@@ -162,7 +209,23 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
   would not be a gate), with staff bypassing so they can preview what they scheduled. Stated honestly: this is a
   **publishing convenience, not an embargo** — it fails open (a video is shown if its window can't be read, rather
   than blanking the library on a Redis blip) and an unparseable date is ignored rather than burying content. For
-  anything that genuinely must not be seen, don't upload it yet or scope it to a group.
+  anything that genuinely must not be seen, don't upload it yet or scope it to a group. Dates are typed and shown in
+  the admin's own time zone (before 2026-09-24 the editor sent them as typed, so the server read them in its own zone — UTC on Vercel).
+- **Repeating windows** _(admin, Videos tab → Schedule → "Only at set times each week")_ — pick days and a time range
+  ("Sundays 09:00–13:00", or Wednesday and Sunday evenings) and viewers see the video only inside those slots, still
+  within its dates. Times are read in the time zone the rule was saved in (shown beside the times), so summer time does
+  not move the slot; an end before the start runs past midnight. It applies everywhere the window does — library,
+  search, the book index, watch page, transcripts, My List, ratings, the podcast feed and the public page — and the
+  Schedule button shows "Weekly · on now" or "Weekly · off now". Staff still see the video at any time. It stops new
+  visits; a player already open keeps going until its signed link runs out. One weekly rule per video, the same hours
+  on each chosen day; no monthly or "first Sunday" rule.
+- **Per-group publish windows** _(admin, Videos tab → Schedule)_ — besides the video's own window, give a group its
+  **own** window: youth leaders see Sunday's talk from Wednesday, or a class keeps a video a month after it is hidden
+  for everyone else. Group windows only ever **add** time — a member sees the video during their group's window OR the
+  default one — so they cannot hide a video from a group (group scopes do that), and a video outside a viewer's group
+  scope stays out of reach whatever the window says. The weekly repeat does not limit them, so leaders can preview
+  outside service hours. Deleting a group removes its windows. The editor lists groups only for an admin with
+  groups.manage; anyone else can still edit the dates, and the group windows they cannot see are kept as they were.
 - **Viewer watermark settings** — global on/off default and a viewer-exemption list (see Video playback & security above).
 - **Content-protection panel** — explains the tokenized-playback model and the bunny.net "Block Direct URL File Access" setting.
 
@@ -200,6 +263,7 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 - `BUNNY_CDN_TOKEN_KEY` — signs thumbnail URLs when the pull-zone token key differs from the embed key.
 - `SENTRY_*` — enable error monitoring and source-map upload.
 - `NEXT_PUBLIC_VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` — enable push notifications (both required; generate with `npx web-push generate-vapid-keys`). `VAPID_SUBJECT` optionally overrides the contact URI.
+- `CRON_SECRET` — switches on the scheduled transcript collector (`/api/cron/transcripts`, scheduled in `vercel.json`). At least 16 random characters; Vercel sends it to the job automatically. Unset (or shorter), the route answers 404 and collection happens only when an admin opens the Videos tab. The schedule is daily (`0 6 * * *`, UTC) because Vercel's Hobby plan refuses to deploy anything more frequent; on Pro, change it to `*/15 * * * *`.
 - `RESEND_API_KEY` — enable emailing/resending share links via Resend. `MAIL_FROM` optionally sets the from address (a Resend-verified sender; defaults to `onboarding@resend.dev`).
 - `GEO_WHITELIST` / `ADMIN_GEO_WHITELIST` — comma-separated ISO country codes for the viewer / admin geo whitelists (see Authentication & access control above). Each only takes effect once its enforcement toggle is turned on in `/admin` → Settings; off and inert by default.
 - `ADMIN_GEO_BYPASS_EMAILS` — comma-separated admin emails that always skip the admin geo check, regardless of country or the enforcement toggle. A standing safety net armed ahead of travel, not an in-the-moment fix — env var changes need a redeploy. Empty/unset by default.
@@ -211,9 +275,17 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
 ## Known gaps / not yet implemented
 - **`email_verified` enforcement is opt-in** — implemented and tested, but off unless `REQUIRE_EMAIL_VERIFIED=1`, because no code can prove a given Auth0 tenant emits the claim. Confirm on a preview, then turn it on.
 - **Owner list is still env-frozen** — capability-based staff are managed live in `/admin` → Roles, but the owner set itself (`ADMIN_EMAILS`) is deliberately env-only: an admin-writable owner list is a bigger prize than an env var, and keeping it out of Redis is what makes self-lockout and privilege escalation structurally impossible rather than merely guarded against.
-- **Comments/ratings** — not implemented.
-- **Transcripts are one language, and the admin fetches them by hand** — bunny can translate captions into 56 languages, but only one track is ingested (English when present, otherwise the first bunny produced). Transcription is asynchronous with no webhook wired up, so “Transcribe” and “Fetch captions” are two clicks minutes apart.
+- **Search matches a phrase, not a translation of one** — every language bunny produced is searched, but each as written: searching "lost sheep" finds a sermon that says it in English, not one that only says "oveja perdida". Accents are part of a word ("donde" does not find "dónde"), as they already were for the default language. Translation matches share the same 25-match union cap as notes and the default transcript.
+- **Automatic transcript collection is daily unless you are on Vercel Pro** — bunny has no webhook, so finished transcriptions are collected when an admin opens the Videos tab and by a scheduled job. On Hobby the job may only run once a day (Vercel's rule), so without an admin visit a transcript can take up to a day to appear; on Pro the schedule can be every 15 minutes. The job is off until `CRON_SECRET` is set. A job bunny never finishes is given up after three days (long enough for at least two scheduled attempts) and has to be fetched with the button.
 - **Group membership needs both capabilities** — naming or changing who is in a group requires `viewers.read` on top of `groups.manage`, because membership is people data: the member addresses, the whole `email → [groupId]` map, and even the per-address refusal ("not an approved viewer") are the approved viewer list by another name. A groups-only manager keeps the registry, the scopes and a member **count**.
-- **Comments are not implemented** — ratings are (above), but there is no free-text discussion anywhere in the portal. That is a deliberate stop: text other viewers can read needs moderation, reporting and a notion of who may delete whose words, none of which exists here.
-- **Rating totals can drift by one against the votes** — a vote and its counter are two writes, not one. The vote is authoritative and written first; the counter is incremented after, best-effort, so an Upstash blip between them leaves the total one short. It is never *corrected*, because recomputing it would mean scanning every viewer's ratings hash, which this repo does not do anywhere. Totals are read as approximate; a negative one is clamped to zero rather than shown. The votes themselves are exact.
+- **A passage search reads at most 1,000 titles** — bunny searches titles as plain text, so a passage query reads every
+  title itself, 100 per request, and stops at 1,000 (the same bound as Browse by book). A larger library is told the
+  search was cut rather than shown a confident short list. Only the 66-book Protestant canon is read.
+- **A cut search says so** — two caps shorten a search: 25 note/transcript matches pulled in by id, then the admin's homepage count (and a passage search that could not read every title is reported the same way). Both are now reported rather than quietly returning a shorter list, because a viewer whose sermon was match 26 otherwise saw a search that confidently did not contain it. The count is only claimed when it is **exact**: matches dropped at the union cap were never fetched, so whether they would have survived the group and schedule filters is genuinely unknown, and the notice says "and there are more" rather than inventing a number.
+- **Comments are flat, final and quiet** — no replies or threads, no editing (delete and post again), no notification of a new one, and no "report" button or admin list of recent comments: moderation happens on the watch page itself. Not on public links or share links, whose viewers are not approved accounts.
+- **Removing a viewer leaves what was recorded about them** — removal clears their tags, roles, groups and feed token, but
+  their progress, saved list, votes and comments stay until something deletes them, and nothing does yet (a moderator can
+  remove the comments by hand). Their
+  votes therefore still count in the totals. The data is keyed by viewer precisely so that deleting it is one key per
+  feature; deciding to do it on removal (and losing a re-added viewer's progress) is an owner call that has not been made.
 - **AI chapters are suggestions, and staying that way is the design** — bunny can generate chapters from the transcript, but nothing on that path writes to the stored list: suggestions are read back read-only (`lib/aiChapters.js`) and land in the admin's textarea, where a person accepts them. A background write would be a second writer for the same field, which is how hand-written chapters get silently replaced. **The field names bunny returns (`title`/`start`) come from its docs, not from a live job** — this has never run against a real transcription, so the reader accepts a few spellings and reports what it could not read rather than returning an empty list.

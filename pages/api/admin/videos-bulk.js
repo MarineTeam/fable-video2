@@ -1,3 +1,4 @@
+import { pruneVideoFromGroups } from '../../../lib/groups';
 import { withMonitorApi } from "../../../lib/monitor";
 import { requireCapability } from '../../../lib/guard';
 import { CAP } from '../../../lib/capabilities';
@@ -5,6 +6,7 @@ import { allowRequest } from '../../../lib/ratelimit';
 import { logAction } from '../../../lib/audit';
 import { deleteVideo, updateVideo } from '../../../lib/bunny';
 import { redis, k } from '../../../lib/redis';
+import { forgetVideo } from '../../../lib/videoCleanup';
 
 const ACTIONS = new Set(['delete', 'assign-collection']);
 const MAX_IDS = 50;
@@ -51,6 +53,11 @@ async function handler(req, res) {
         await r.set(k('order'), orderRaw.filter((g) => !succeeded.has(g)));
       }
     } catch {}
+    await pruneVideoFromGroups([...succeeded]);
+    // The same per-video cleanup as a single delete. Before this, a bulk
+    // delete left every video's schedule, chapters, notes, transcript,
+    // public flag and score behind.
+    await Promise.all([...succeeded].map((id) => forgetVideo(id)));
   }
 
   const okCount = results.filter((r) => r.ok).length;

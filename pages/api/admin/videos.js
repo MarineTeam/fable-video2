@@ -1,3 +1,4 @@
+import { pruneVideoFromGroups } from '../../../lib/groups';
 import { withMonitorApi } from "../../../lib/monitor";
 import { requireCapability } from '../../../lib/guard';
 import { CAP } from '../../../lib/capabilities';
@@ -9,14 +10,15 @@ import {
 } from '../../../lib/bunny';
 import { redis, k } from '../../../lib/redis';
 import { applyOrder } from '../../../lib/order';
-import { loadSchedule, clearVideoWindow } from '../../../lib/scheduleStore';
-import { loadAllChapters, clearVideoChapters } from '../../../lib/chaptersStore';
-import { loadAllNotes, clearVideoNotes } from '../../../lib/notesStore';
-import { clearVideoTranscript } from '../../../lib/captionsStore';
-import { loadPublicVideoGuids, clearVideoPublic } from '../../../lib/publicVideosStore';
-import { clearVideoRatingCounts, getRatingCounts } from '../../../lib/ratingsStore';
+import { loadSchedule } from '../../../lib/scheduleStore';
+import { loadAllChapters } from '../../../lib/chaptersStore';
+import { loadAllNotes } from '../../../lib/notesStore';
+import { loadPublicVideoGuids } from '../../../lib/publicVideosStore';
+import { getRatingCounts } from '../../../lib/ratingsStore';
+import { forgetVideo } from '../../../lib/videoCleanup';
 import { countsByVideo, countsFor, summarize } from '../../../lib/ratings';
 import { announceNewVideos } from '../../../lib/push';
+import { collectFinishedTranscripts } from '../../../lib/transcriptCollect';
 import { logAction } from '../../../lib/audit';
 import { getVideoModes, setVideoMode, clampWatermarkMode } from '../../../lib/watermark';
 
@@ -31,6 +33,18 @@ async function handler(req, res) {
       const items = data?.items || [];
       // Announce freshly finished uploads (atomic once-only guard inside).
       await announceNewVideos(items).catch(() => {});
+      // Best-effort, same contract: collect any transcription bunny has
+      // finished since it was queued, so the admin does not have to remember a
+      // second click minutes later. Bounded per request by
+      // lib/transcribeQueue.js; failures are retried next load and age out.
+      const { collected } = await collectFinishedTranscripts().catch(() => ({ collected: [] }));
+      for (const item of collected) {
+        await logAction(
+          admin,
+          'video.transcript_ingest',
+          `${item.guid} (${item.language}, ${item.cues}, collected automatically)`
+        ).catch(() => {});
+      }
       const orderRaw = await r.get(k('order')).catch(() => null);
       const ordered = applyOrder(items, Array.isArray(orderRaw) ? orderRaw : []);
       const watermarkModes = await getVideoModes(ordered.map((v) => v.guid));
@@ -110,16 +124,13 @@ async function handler(req, res) {
           await r.set(k('order'), orderRaw.filter((g) => g !== id));
         }
       } catch {}
-      // And from the publish-window hash, same no-orphans contract.
-      await clearVideoWindow(id);
-      await clearVideoChapters(id);
-      await clearVideoNotes(id);
-      // Third per-video decoration, cleared with the other two — a transcript
-      // that outlives its video is a row nothing will ever collect.
-      await clearVideoTranscript(id);
-      await clearVideoPublic(id);
-      // A recycled bunny.net guid must not inherit another video's score.
-      await clearVideoRatingCounts(id);
+      // Everything stored ABOUT the video — schedule, chapters, notes,
+      // transcript, public flag, score, comments — in one shared list, so the
+      // bulk delete forgets exactly the same things (lib/videoCleanup.js).
+      await forgetVideo(id);
+      // Nor stay granted to a group — a cancelled upload is deleted here, and
+      // the upload may already have ticked it into groups.
+      await pruneVideoFromGroups(id);
       await logAction(admin, 'video.delete', id);
       return res.json({ ok: true });
     } catch {

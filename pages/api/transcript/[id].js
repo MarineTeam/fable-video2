@@ -2,10 +2,10 @@ import { withMonitorApi } from '../../../lib/monitor';
 import { requireViewer } from '../../../lib/guard';
 import { oneTrimmed } from '../../../lib/params';
 import { contentScopeFor, isVideoVisible } from '../../../lib/groups';
-import { isWithinWindow } from '../../../lib/schedule';
-import { getVideoWindow } from '../../../lib/scheduleStore';
+import { isVideoInWindowFor } from '../../../lib/scheduleStore';
 import { getVideo } from '../../../lib/bunny';
-import { getVideoTranscript } from '../../../lib/captionsStore';
+import { getVideoTranscript, getTranscriptLanguages } from '../../../lib/captionsStore';
+import { languageMissing, pickLanguage } from '../../../lib/captions';
 
 // One video's transcript, for the watch page.
 //
@@ -16,7 +16,7 @@ import { getVideoTranscript } from '../../../lib/captionsStore';
 //
 //   1. approved viewer + geo                 (requireViewer)
 //   2. group content gating, enforcement 4   (contentScopeFor/isVideoVisible)
-//   3. publish window, staff exempt          (isWithinWindow)
+//   3. publish window, staff exempt          (isVideoInWindowFor)
 //
 // Note that 2 needs the VIDEO, not just its id — isVideoVisible reads the
 // video's collection — so this route fetches it, exactly as the page does.
@@ -56,14 +56,25 @@ async function handler(req, res) {
     return res.status(404).json({ error: 'Not found' });
   }
 
-  if (!admin && !isWithinWindow(await getVideoWindow(video.guid))) {
+  if (!admin && !(await isVideoInWindowFor(video.guid, viewer.email))) {
     return res.status(404).json({ error: 'Not found' });
   }
 
   // An empty transcript is a normal answer, not an error: most videos have
   // never been transcribed, and the panel renders nothing for them.
   // getVideoTranscript already swallows read failures into [].
-  return res.json({ cues: await getVideoTranscript(video.guid) });
+  const { default: fallback, all } = await getTranscriptLanguages(video.guid);
+  const requested = oneTrimmed(req.query.lang);
+  const language = pickLanguage(all, requested, fallback);
+  // `missing` is reported rather than papered over: a viewer who picked
+  // Spanish and is shown English would conclude the translation is WRONG,
+  // which is worse than being told there isn't one.
+  return res.json({
+    cues: await getVideoTranscript(video.guid, language),
+    language,
+    languages: all,
+    missing: languageMissing(all, requested),
+  });
 }
 
 export default withMonitorApi(handler);

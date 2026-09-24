@@ -63,6 +63,7 @@ from repo root — re-run it before trusting this table).
 | `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | `components/NotifyButton.js:4` (client, **build-baked**), `lib/push.js:6,39`, `pages/admin.js:32` (server) | Both | Push UI hidden, push silently disabled | Baked into the bundle — changing it requires a rebuild. See half-configured trap below |
 | `VAPID_PRIVATE_KEY` | `lib/push.js:6,40` | Server | Push disabled | Secret half of the keypair from `npx web-push generate-vapid-keys` (VAPID = the Web Push server-identification standard; protocol in the reference skill) |
 | `VAPID_SUBJECT` | `lib/push.js:36` | Server | Defaults to `mailto:<first ADMIN_EMAILS entry>` (or `mailto:admin@example.com` if that's empty too) | Must be a `mailto:` or `https:` URI |
+| `CRON_SECRET` | `lib/cronAuth.js` `cronSecret()`, read by `pages/api/cron/transcripts.js` | Server | Every `/api/cron/*` route answers 404 (also when shorter than 16 characters, which is logged); transcripts are collected only when an admin opens the Videos tab | **Secret** — anyone holding it can trigger the job. 16+ random characters (`openssl rand -hex 24`); Vercel sends it as `Authorization: Bearer …` on each cron call. Schedule lives in `vercel.json` |
 | `RESEND_API_KEY` | `lib/mail.js:5,17`; `pages/admin.js:31` (gates the email UI) | Server | Share-link email UI hidden; `sendShareEmail` returns `{ok:false, skipped:true}` — link creation still works | Mail is best-effort: a send failure never blocks link creation (`pages/api/admin/share.js:79`) |
 | `MAIL_FROM` | `lib/mail.js:11` | Server | Defaults to `onboarding@resend.dev` (Resend's test sender) | Production value must be a Resend-verified sender, e.g. `Marine Video Portal <share@yourdomain.com>` |
 | `SENTRY_DSN` | `sentry.server.config.js:4`, `sentry.edge.config.js:4` | Server + edge runtime | Sentry init is skipped entirely — inert | Server-side errors only |
@@ -76,6 +77,7 @@ from repo root — re-run it before trusting this table).
 | Web Push | **BOTH** `NEXT_PUBLIC_VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` set (`lib/push.js:5-7`) | Notify button and broadcast composer hidden; `/api/push/subscribe` and `/api/admin/broadcast` return 400; `sendToAll`/`announceNewVideos` no-op |
 | Share-link email | `RESEND_API_KEY` set (`lib/mail.js:4-6`) | "Email the link" checkbox and "Resend email" button hidden; nothing ever sent |
 | Thumbnails | `BUNNY_CDN_HOSTNAME` set | Title list instead of grid (playback unaffected) |
+| Scheduled transcript collection | `CRON_SECRET` set, 16+ characters (`lib/cronAuth.js`) | `/api/cron/transcripts` answers 404; transcripts still collected when an admin opens the Videos tab, and by *Fetch captions* |
 | Email-verification enforcement | `REQUIRE_EMAIL_VERIFIED=1` | Access trusts the session email claim as-is — the pre-2026-08-31 behaviour. Note this is the one "inert" default that leaves a security gap open rather than a feature switched off: turn it on as soon as the claim is confirmed on a preview |
 | Podcast feed | `BUNNY_CDN_HOSTNAME` set (and MP4 Fallback enabled on the Bunny library) | `/api/feed/<token>` 404s and the viewer-facing feed section is hidden — without a CDN host there is no enclosure URL, and a feed of broken links is worse than no feed |
 | Group content gating | `GROUP_CONTENT_GATING=1` | Groups are membership bookkeeping only — scopes are recorded in /admin → Groups but restrict nobody's library |
@@ -155,6 +157,7 @@ KV_REST_API_TOKEN=...
 # NEXT_PUBLIC_VAPID_PUBLIC_KEY=...
 # VAPID_PRIVATE_KEY=...
 # VAPID_SUBJECT=mailto:you@example.com
+# CRON_SECRET=...   (16+ random characters; switches on the scheduled transcript collector)
 # RESEND_API_KEY=...
 # MAIL_FROM=Marine Video Portal <share@yourdomain.com>
 # SENTRY_DSN=...
@@ -303,6 +306,8 @@ grep -n "DEFAULT_COUNT\|Math.min(Math.max" pages/api/admin/settings.js pages/api
 grep -n -A12 "Dummy values" .github/workflows/ci.yml
 # KV_*/UPSTASH_* fallback order:
 grep -n "KV_REST_API" lib/redis.js
+# CRON_SECRET still trimmed, length-checked, and inert when absent:
+grep -n "CRON_SECRET\|MIN_CRON_SECRET_LENGTH\|trim" lib/cronAuth.js
 ```
 
 If any grep output disagrees with this file, the code wins — update this file.

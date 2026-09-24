@@ -1,5 +1,6 @@
 import { withMonitorApi } from '../../lib/monitor';
 import { getSiteName } from '../../lib/siteNameStore';
+import { getAppIconVersion } from '../../lib/appIconStore';
 import { shortSiteName } from '../../lib/siteName';
 import { DEFAULT_THEME } from '../../lib/theme';
 
@@ -15,6 +16,9 @@ import { DEFAULT_THEME } from '../../lib/theme';
 async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
   const siteName = await getSiteName();
+  // The admin-set icon, when there is one; an unreadable version means the
+  // built-in icons, never a broken manifest.
+  const iconVersion = await getAppIconVersion().catch(() => null);
   res.setHeader('content-type', 'application/manifest+json; charset=utf-8');
   // Always revalidate. This response is tiny and fetched rarely, and the site
   // name behind it can change at any moment with no redeploy — an HTTP cache
@@ -31,12 +35,21 @@ async function handler(req, res) {
         display: 'standalone',
         background_color: DEFAULT_THEME.colors.bg,
         theme_color: DEFAULT_THEME.colors.bg,
-        icons: [
-          { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-          { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-          { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
-          { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
-        ],
+        // A custom icon replaces ALL of these, the SVG included — left in, a
+        // browser preferring vector icons would keep showing the old one —
+        // and is offered as 'any' only: an arbitrary image has no safe zone,
+        // so as 'maskable' Android would clip its edges.
+        icons: iconVersion
+          ? [
+              { src: `/api/app-icon/192?v=${iconVersion}`, sizes: '192x192', type: 'image/png', purpose: 'any' },
+              { src: `/api/app-icon/512?v=${iconVersion}`, sizes: '512x512', type: 'image/png', purpose: 'any' },
+            ]
+          : [
+              { src: '/icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+              { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+              { src: '/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+              { src: '/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
+            ],
       },
       null,
       2

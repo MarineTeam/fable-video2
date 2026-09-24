@@ -4,6 +4,7 @@ import { CAP } from '../../../lib/capabilities';
 import { listCollections, createCollection, deleteCollection } from '../../../lib/bunny';
 import { logAction } from '../../../lib/audit';
 import { oneTrimmed } from '../../../lib/params';
+import { pruneCollectionFromGroups } from '../../../lib/groups';
 
 async function handler(req, res) {
   const admin = await requireCapability(req, res, req.method === 'GET' ? CAP.VIDEOS_READ : CAP.VIDEOS_MANAGE);
@@ -41,7 +42,13 @@ async function handler(req, res) {
     if (!id) return res.status(400).json({ error: 'Bad id' });
     try {
       await deleteCollection(id);
-      await logAction(admin, 'collection.delete', id);
+      // A group scoped to this collection must not keep granting it.
+      const pruned = await pruneCollectionFromGroups(id);
+      await logAction(
+        admin,
+        'collection.delete',
+        pruned ? `${id} (cleared from ${pruned} group scope(s))` : id
+      );
       return res.json({ ok: true });
     } catch {
       return res.status(502).json({ error: 'Could not delete collection' });
