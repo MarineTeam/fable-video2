@@ -1556,58 +1556,6 @@ function VideoAnalyticsPanel({ stats }) {
 // inline version since it drives a raw textarea, not an array.
 function AddViewersByTag({ viewers, onAdd }) {
   const [tagPick, setTagPick] = useState('');
-  const loadRequests = useCallback(async () => {
-    try {
-      setRequests((await api('/api/admin/access-requests')).requests || []);
-    } catch {
-      // A staff member without viewers.read simply has no queue to show.
-    }
-  }, []);
-
-  useEffect(() => {
-    loadRequests();
-    // The group picker is a convenience on approval; silently absent for
-    // someone without groups.manage, same idiom as the tab loaders above.
-    api('/api/admin/groups')
-      .then((d) => setGroups(d.groups || []))
-      .catch(() => {});
-  }, [loadRequests]);
-
-  async function approveRequest(target) {
-    const picked = [...(approveGroups[target] || [])];
-    try {
-      await api('/api/admin/access-requests', {
-        method: 'POST',
-        body: { email: target, groupIds: picked },
-      });
-      setStatus(`Approved ${target}.`);
-      loadRequests();
-      reload();
-    } catch (err) {
-      setStatus(err.message);
-    }
-  }
-
-  async function dismissRequest(target) {
-    if (!window.confirm(`Dismiss the access request from ${target}? They can ask again later.`)) {
-      return;
-    }
-    try {
-      await api('/api/admin/access-requests', { method: 'DELETE', body: { email: target } });
-      loadRequests();
-    } catch (err) {
-      setStatus(err.message);
-    }
-  }
-
-  function toggleApproveGroup(target, groupId) {
-    setApproveGroups((prev) => {
-      const next = new Set(prev[target] || []);
-      if (next.has(groupId)) next.delete(groupId);
-      else next.add(groupId);
-      return { ...prev, [target]: next };
-    });
-  }
 
   const availableTags = useMemo(
     () => [...new Set((viewers || []).flatMap((v) => v.tags || []))].sort(),
@@ -2023,6 +1971,64 @@ function ViewersTab({ viewers, reload }) {
   const [bulkTag, setBulkTag] = useState('');
   const [bulkTagBusy, setBulkTagBusy] = useState(false);
   const [rowTagInputs, setRowTagInputs] = useState({}); // email -> draft tag text
+
+  // The access-request queue. This block lived inside AddViewersByTag from
+  // 2026-08-31 until 2026-09-24 — a different component, where setRequests,
+  // setGroups and setStatus do not exist — so the queue never loaded (the
+  // ReferenceErrors were swallowed by the catches) and Approve / Dismiss
+  // could not be reached. It belongs here, next to the state it sets.
+  const loadRequests = useCallback(async () => {
+    try {
+      setRequests((await api('/api/admin/access-requests')).requests || []);
+    } catch {
+      // A staff member without viewers.read simply has no queue to show.
+    }
+  }, []);
+
+  useEffect(() => {
+    loadRequests();
+    // The group picker is a convenience on approval; silently absent for
+    // someone without groups.manage, same idiom as the tab loaders above.
+    api('/api/admin/groups')
+      .then((d) => setGroups(d.groups || []))
+      .catch(() => {});
+  }, [loadRequests]);
+
+  async function approveRequest(target) {
+    const picked = [...(approveGroups[target] || [])];
+    try {
+      await api('/api/admin/access-requests', {
+        method: 'POST',
+        body: { email: target, groupIds: picked },
+      });
+      setStatus(`Approved ${target}.`);
+      loadRequests();
+      reload();
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
+  async function dismissRequest(target) {
+    if (!window.confirm(`Dismiss the access request from ${target}? They can ask again later.`)) {
+      return;
+    }
+    try {
+      await api('/api/admin/access-requests', { method: 'DELETE', body: { email: target } });
+      loadRequests();
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
+  function toggleApproveGroup(target, groupId) {
+    setApproveGroups((prev) => {
+      const next = new Set(prev[target] || []);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return { ...prev, [target]: next };
+    });
+  }
 
   const availableTags = useMemo(
     () => [...new Set(viewers.flatMap((v) => v.tags || []))].sort(),
