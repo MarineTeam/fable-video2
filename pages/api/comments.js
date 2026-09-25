@@ -6,6 +6,7 @@ import { oneTrimmed } from '../../lib/params';
 import { allowRequest } from '../../lib/ratelimit';
 import { logAction } from '../../lib/audit';
 import { contentScopeFor, isVideoVisible } from '../../lib/groups';
+import { isScoped, videoInScope } from '../../lib/staffScopeRules';
 import { isVideoInWindowFor } from '../../lib/scheduleStore';
 import { getVideo } from '../../lib/bunny';
 import { cleanCommentText, commentView, displayName } from '../../lib/comments';
@@ -57,8 +58,15 @@ async function handler(req, res) {
 
   const actor = await resolveActor(viewer.email);
   const holds = (cap) => actor.owner || hasCapability(actor.capabilities, cap);
-  const canModerate = holds(CAP.COMMENTS_MANAGE);
-  const viewOptions = { email: viewer.email, canModerate, canSeeEmails: holds(CAP.VIEWERS_READ) };
+  // A group-scoped moderator acts only on videos their groups grant — even
+  // with gating off, when everyone can watch everything — and never sees
+  // commenters' addresses: people outside their groups comment too.
+  const canModerate = holds(CAP.COMMENTS_MANAGE) && videoInScope(actor, video);
+  const viewOptions = {
+    email: viewer.email,
+    canModerate,
+    canSeeEmails: holds(CAP.VIEWERS_READ) && !isScoped(actor),
+  };
   const inWindow = async () => admin || (await isVideoInWindowFor(video.guid, viewer.email));
 
   if (req.method === 'GET') {

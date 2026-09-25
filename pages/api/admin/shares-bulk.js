@@ -1,5 +1,6 @@
 import { withMonitorApi } from "../../../lib/monitor";
-import { requireCapability } from '../../../lib/guard';
+import { requireActor } from '../../../lib/guard';
+import { shareIdsOutsideScope } from '../../../lib/staffScope';
 import { CAP } from '../../../lib/capabilities';
 import { allowRequest } from '../../../lib/ratelimit';
 import { logAction } from '../../../lib/audit';
@@ -16,8 +17,9 @@ const MAX_IDS = 200;
 // for why that's the difference between O(1) and O(selection size) commands.
 async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  const admin = await requireCapability(req, res, CAP.SHARES_MANAGE);
-  if (!admin) return;
+  const actor = await requireActor(req, res, CAP.SHARES_MANAGE);
+  if (!actor) return;
+  const admin = actor.email;
   if (!(await allowRequest('shares-bulk', admin, 10, 60))) {
     return res.status(429).json({ error: 'Too many requests' });
   }
@@ -29,6 +31,10 @@ async function handler(req, res) {
   }
   const uniqueIds = [...new Set(ids.map(String))];
   const origin = baseUrl(req);
+  // A group-scoped caller acts only on links to videos their groups grant.
+  if ((await shareIdsOutsideScope(actor, uniqueIds)).length) {
+    return res.status(404).json({ error: 'Link not found' });
+  }
 
   let results;
   try {

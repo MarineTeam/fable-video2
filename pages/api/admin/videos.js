@@ -1,6 +1,8 @@
 import { pruneVideoFromGroups } from '../../../lib/groups';
 import { withMonitorApi } from "../../../lib/monitor";
-import { requireCapability } from '../../../lib/guard';
+import { requireActor } from '../../../lib/guard';
+import { SCOPED_REFUSAL, guidInScope, scopedDeleteProblem } from '../../../lib/staffScope';
+import { isScoped, videoInScope } from '../../../lib/staffScopeRules';
 import { CAP } from '../../../lib/capabilities';
 import {
   updateVideo,
@@ -23,8 +25,12 @@ import { logAction } from '../../../lib/audit';
 import { getVideoModes, setVideoMode, clampWatermarkMode } from '../../../lib/watermark';
 
 async function handler(req, res) {
-  const admin = await requireCapability(req, res, req.method === 'GET' ? CAP.VIDEOS_READ : CAP.VIDEOS_MANAGE);
-  if (!admin) return;
+  const actor = await requireActor(req, res, req.method === 'GET' ? CAP.VIDEOS_READ : CAP.VIDEOS_MANAGE);
+  if (!actor) return;
+  const admin = actor.email;
+  // Group-scoped staff (lib/staffScopeRules.js) see and change only the
+  // videos their groups grant, and none of the library-wide acts.
+  const scoped = isScoped(actor);
   const r = redis();
 
   if (req.method === 'GET') {
@@ -32,7 +38,8 @@ async function handler(req, res) {
       // The whole library, not bunny's newest 100 — a video past the first
       // page used to have no row here, so it could not be renamed, scheduled
       // or transcribed. See lib/videoLibrary.js.
-      const { videos: items, truncated } = await listAllVideos();
+      const { videos: library, truncated } = await listAllVideos();
+      const items = scoped ? library.filter((v) => videoInScope(actor, v)) : library;
       // Announce freshly finished uploads (atomic once-only guard inside).
       await announceNewVideos(items).catch(() => {});
       // Best-effort, same contract: collect any transcription bunny has
@@ -93,6 +100,12 @@ async function handler(req, res) {
   if (req.method === 'PUT') {
     const { id, title, collectionId, watermarkMode } = req.body || {};
     if (typeof id !== 'string' || !id) return res.status(400).json({ error: 'Bad id' });
+    if (scoped) {
+      // Collections are shared across groups: moving a video between them
+      // changes who else can see it.
+      if (collectionId !== undefined) return res.status(403).json({ error: SCOPED_REFUSAL });
+      if (!(await guidInScope(actor, id))) return res.status(404).json({ error: 'Video not found' });
+    }
     const fields = {};
     if (typeof title === 'string' && title.trim()) fields.title = title.trim().slice(0, 200);
     if (typeof collectionId === 'string') fields.collectionId = collectionId;
@@ -120,6 +133,8 @@ async function handler(req, res) {
   if (req.method === 'DELETE') {
     const id = String(req.query.id || req.body?.id || '');
     if (!id) return res.status(400).json({ error: 'Bad id' });
+    const refused = await scopedDeleteProblem(actor, id);
+    if (refused) return res.status(refused.status).json({ error: refused.error });
     try {
       await deleteVideo(id);
       // Prune the deleted video from the saved order.

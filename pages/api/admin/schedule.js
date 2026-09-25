@@ -1,10 +1,12 @@
 import { withMonitorApi } from '../../../lib/monitor';
-import { requireCapability } from '../../../lib/guard';
+import { requireActor } from '../../../lib/guard';
+import { guidInScope } from '../../../lib/staffScope';
+import { isScoped, scheduleGroupsProblem } from '../../../lib/staffScopeRules';
 import { CAP } from '../../../lib/capabilities';
 import { logAction } from '../../../lib/audit';
 import { normalizeEntry, normalizeWindow, validateGroupWindows, validateRepeat } from '../../../lib/schedule';
 import { loadGroups } from '../../../lib/groups';
-import { setVideoWindow } from '../../../lib/scheduleStore';
+import { getVideoWindow, setVideoWindow } from '../../../lib/scheduleStore';
 import { oneTrimmed } from '../../../lib/params';
 
 // Sets a video's publish window — the default from/until, an optional weekly
@@ -27,12 +29,15 @@ function describe(guid, window) {
 }
 
 async function handler(req, res) {
-  const admin = await requireCapability(req, res, CAP.VIDEOS_MANAGE);
-  if (!admin) return;
+  const actor = await requireActor(req, res, CAP.VIDEOS_MANAGE);
+  if (!actor) return;
+  const admin = actor.email;
 
   if (req.method === 'POST') {
     const guid = oneTrimmed(req.body?.guid) || '';
     if (!/^[0-9a-f-]{10,64}$/i.test(guid)) return res.status(400).json({ error: 'Bad video id' });
+    // A group-scoped caller schedules only videos their groups grant.
+    if (!(await guidInScope(actor, guid))) return res.status(404).json({ error: 'Video not found' });
     const base = normalizeWindow({ from: req.body?.from, until: req.body?.until });
     if (base?.invalid) {
       return res.status(400).json({ error: 'The end of the window must be after its start' });
@@ -53,6 +58,19 @@ async function handler(req, res) {
       groups = checked.groups;
     }
     const window = normalizeEntry({ from: base?.from, until: base?.until, repeat, groups });
+    // ...and sets per-group windows only for their own groups; every other
+    // group's window must come back exactly as stored.
+    if (isScoped(actor)) {
+      let stored;
+      let groupsById;
+      try {
+        [stored, groupsById] = await Promise.all([getVideoWindow(guid), loadGroups()]);
+      } catch {
+        return res.status(500).json({ error: 'Could not read the schedule' });
+      }
+      const problem = scheduleGroupsProblem(actor, stored?.groups, window?.groups, groupsById);
+      if (problem) return res.status(403).json({ error: problem });
+    }
     try {
       await setVideoWindow(guid, window);
       await logAction(admin, 'video.schedule', describe(guid, window));

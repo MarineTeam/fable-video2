@@ -1,5 +1,13 @@
 import { withMonitorApi } from '../../../lib/monitor';
-import { requireCapability, resolveActor } from '../../../lib/guard';
+import { requireActor } from '../../../lib/guard';
+import { SCOPED_REFUSAL } from '../../../lib/staffScope';
+import {
+  effectiveScopeGroups,
+  isScoped,
+  leavesNoGroup,
+  membershipChangeProblem,
+  personInScope,
+} from '../../../lib/staffScopeRules';
 import { allowRequest } from '../../../lib/ratelimit';
 import { logAction } from '../../../lib/audit';
 import { normalizeEmail, isValidEmail } from '../../../lib/auth';
@@ -44,21 +52,27 @@ import {
 // group registry and its scopes is unaffected — a groups-only manager keeps
 // every power they had except naming and changing who is in a group.
 async function handler(req, res) {
-  const admin = await requireCapability(req, res, CAP.GROUPS_MANAGE);
-  if (!admin) return;
+  const actor = await requireActor(req, res, CAP.GROUPS_MANAGE);
+  if (!actor) return;
+  const admin = actor.email;
   if (req.method !== 'GET' && !(await allowRequest('groups', admin, 20, 60))) {
     return res.status(429).json({ error: 'Too many requests' });
   }
 
-  // Decided once, used by GET and by the membership actions below.
-  //
-  // requireCapability returns the EMAIL (so call sites can pass it straight to
-  // logAction), not the resolved actor, so the capability list has to be asked
-  // for again. Owners hold the whole catalog by definition and are checked the
-  // same way requireCapability checks them — reading only `capabilities` would
-  // lock an owner out of the member list they are entitled to.
-  const actor = await resolveActor(admin);
+  // Decided once, used by GET and by the membership actions below. Owners
+  // hold the whole catalog by definition and are checked the same way
+  // requireCapability checks them — reading only `capabilities` would lock an
+  // owner out of the member list they are entitled to.
   const maySeePeople = actor.owner || hasCapability(actor.capabilities, CAP.VIEWERS_READ);
+  // Group-scoped staff (lib/staffScopeRules.js) change who is in their own
+  // groups and nothing else here: a scope IS what its groups grant, so
+  // creating, re-scoping or deleting a group — or the default-access switch —
+  // would widen it.
+  const scoped = isScoped(actor);
+  const action = String(req.body?.action || '');
+  if (scoped && (['POST', 'PUT', 'DELETE'].includes(req.method) || action === 'set-default-access')) {
+    return res.status(403).json({ error: SCOPED_REFUSAL });
+  }
 
   if (req.method === 'GET') {
     try {
@@ -67,7 +81,17 @@ async function handler(req, res) {
         loadGroupMemberships(),
         groupDefaultAccess(),
       ]);
-      const groups = sortedGroups(groupsById).map((g) => {
+      const mine = scoped ? new Set(effectiveScopeGroups(actor.staffScope, groupsById)) : null;
+      // A scoped caller's view: their groups, and their people's membership
+      // in those groups only.
+      const visibleMemberships = mine
+        ? Object.fromEntries(
+            Object.entries(memberships)
+              .map(([email, ids]) => [email, ids.filter((id) => mine.has(id))])
+              .filter(([, ids]) => ids.length)
+          )
+        : memberships;
+      const groups = sortedGroups(groupsById).filter((g) => !mine || mine.has(g.id)).map((g) => {
         const members = membersOfGroup(memberships, g.id);
         // A COUNT is not people data; the addresses are. A groups-only
         // manager still sees how big a group is, which is what the scope
@@ -78,8 +102,9 @@ async function handler(req, res) {
       });
       return res.json({
         groups,
-        ...(maySeePeople ? { memberships } : {}),
+        ...(maySeePeople ? { memberships: visibleMemberships } : {}),
         canEditMembers: maySeePeople,
+        canEditGroups: !scoped,
         gating: { enabled: groupGatingEnabled(), defaultAccess },
       });
     } catch {
@@ -138,7 +163,6 @@ async function handler(req, res) {
   if (req.method === 'PATCH') {
     // Two membership shapes: per-group (the Groups tab) and per-user (the
     // Viewers tab). Both land in the same email -> [groupId] hash.
-    const action = String(req.body?.action || '');
     // Both membership shapes name people; the default-access toggle does not.
     if ((action === 'set-members' || action === 'set-groups') && !maySeePeople) {
       return res.status(403).json({ error: 'Forbidden' });
@@ -149,7 +173,30 @@ async function handler(req, res) {
         if (!isValidGroupId(groupId)) return res.status(400).json({ error: 'Bad group id' });
         const groupsById = await loadGroups();
         if (!groupsById[groupId]) return res.status(404).json({ error: 'No such group' });
-        const emails = Array.isArray(req.body?.emails) ? req.body.emails.map(String) : [];
+        let emails = Array.isArray(req.body?.emails) ? req.body.emails.map(String) : [];
+        // A scoped caller: only their own group; newcomers must already be
+        // their people (anyone else is reported like a stranger); and nobody
+        // is taken out of their last group — they are kept, and reported.
+        let hidden = [];
+        const refused = [];
+        if (scoped) {
+          if (!effectiveScopeGroups(actor.staffScope, groupsById).includes(groupId)) {
+            return res.status(404).json({ error: 'No such group' });
+          }
+          const memberships = await loadGroupMemberships();
+          const current = membersOfGroup(memberships, groupId);
+          const wanted = [...new Set(emails.map((e) => normalizeEmail(e)).filter(Boolean))];
+          hidden = wanted.filter((e) => !current.includes(e) && !personInScope(actor, memberships[e], groupsById));
+          emails = wanted.filter((e) => !hidden.includes(e));
+          for (const email of current) {
+            if (emails.includes(email)) continue;
+            const after = (memberships[email] || []).filter((id) => id !== groupId);
+            if (leavesNoGroup(after, groupsById)) {
+              refused.push(email);
+              emails.push(email);
+            }
+          }
+        }
         // Only approved viewers may be put in a group — the rule
         // lib/viewerTags.js has always applied to tagging, and membership is
         // the same claim about the same person. A read failure passes null,
@@ -161,7 +208,10 @@ async function handler(req, res) {
         } catch {
           approved = null;
         }
-        const result = await setMembersOfGroup(groupId, emails, { approved });
+        const planned = await setMembersOfGroup(groupId, emails, { approved });
+        const result = scoped
+          ? { ...planned, unknown: [...new Set([...planned.unknown, ...hidden])].sort(), refused }
+          : planned;
         await logAction(
           admin,
           'group.members',
@@ -175,6 +225,15 @@ async function handler(req, res) {
         if (!email || !isValidEmail(email)) return res.status(400).json({ error: 'Bad email' });
         const groupsById = await loadGroups();
         const requested = Array.isArray(req.body?.groupIds) ? req.body.groupIds.map(String) : [];
+        if (scoped) {
+          const memberships = await loadGroupMemberships();
+          const before = memberships[email] || [];
+          if (!personInScope(actor, before, groupsById)) {
+            return res.status(404).json({ error: 'Not a viewer' });
+          }
+          const problem = membershipChangeProblem(actor, before, requested, groupsById);
+          if (problem) return res.status(403).json({ error: problem });
+        }
         const result = await setGroupsForEmail(email, requested, groupsById);
         if (!result.ok) return res.status(400).json({ error: result.error });
         await logAction(

@@ -1,5 +1,6 @@
 import { withMonitorApi } from "../../../lib/monitor";
-import { requireCapability } from '../../../lib/guard';
+import { requireActor } from '../../../lib/guard';
+import { isScoped, videoInScope } from '../../../lib/staffScopeRules';
 import { CAP } from '../../../lib/capabilities';
 import { getStatistics } from '../../../lib/bunny';
 import { listAllVideos } from '../../../lib/videoLibrary';
@@ -9,8 +10,12 @@ import { listAllVideos } from '../../../lib/videoLibrary';
 // renders a dashboard.
 async function handler(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
-  const admin = await requireCapability(req, res, CAP.ANALYTICS_READ);
-  if (!admin) return;
+  const actor = await requireActor(req, res, CAP.ANALYTICS_READ);
+  if (!actor) return;
+  // A group-scoped caller gets their own videos' numbers. bunny's 30-day
+  // chart and watch time are one figure for the whole library, so they are
+  // left out for them rather than shown as if they were theirs.
+  const scoped = isScoped(actor);
 
   const now = new Date();
   const from = new Date(now.getTime() - 30 * 24 * 3600 * 1000);
@@ -19,13 +24,15 @@ async function handler(req, res) {
     // Every video, so total views and the most-watched list are not drawn
     // from the newest 100 alone.
     listAllVideos().catch(() => null),
-    getStatistics({
-      dateFrom: from.toISOString().slice(0, 10),
-      dateTo: now.toISOString().slice(0, 10),
-    }).catch(() => null),
+    scoped
+      ? Promise.resolve(null)
+      : getStatistics({
+          dateFrom: from.toISOString().slice(0, 10),
+          dateTo: now.toISOString().slice(0, 10),
+        }).catch(() => null),
   ]);
 
-  const items = list?.videos || [];
+  const items = (list?.videos || []).filter((v) => videoInScope(actor, v));
   const totalViews = items.reduce((sum, v) => sum + (v.views || 0), 0);
   const top = [...items]
     .sort((a, b) => (b.views || 0) - (a.views || 0))
@@ -47,7 +54,8 @@ async function handler(req, res) {
   const watchMinutes = Object.values(watchMap).reduce((sum, v) => sum + (Number(v) || 0), 0);
 
   res.json({
-    videoCount: list?.total ?? items.length,
+    videoCount: scoped ? items.length : list?.total ?? items.length,
+    libraryWide: !scoped,
     // The library is larger than a whole-library read; the counts cover the
     // newest videos only.
     truncated: Boolean(list?.truncated),

@@ -1,5 +1,7 @@
 import { withMonitorApi } from "../../../lib/monitor";
-import { requireCapability } from '../../../lib/guard';
+import { requireActor } from '../../../lib/guard';
+import { isScoped, personInScope } from '../../../lib/staffScopeRules';
+import { loadGroupMemberships, loadGroups } from '../../../lib/groups';
 import { CAP } from '../../../lib/capabilities';
 import { allowRequest } from '../../../lib/ratelimit';
 import { logAction } from '../../../lib/audit';
@@ -14,8 +16,9 @@ const MAX_EMAILS = 500;
 // tag editor — the admin UI just calls it with a one-email selection.
 async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  const admin = await requireCapability(req, res, CAP.VIEWERS_MANAGE);
-  if (!admin) return;
+  const actor = await requireActor(req, res, CAP.VIEWERS_MANAGE);
+  if (!actor) return;
+  const admin = actor.email;
   if (!(await allowRequest('viewers-bulk', admin, 20, 60))) {
     return res.status(429).json({ error: 'Too many requests' });
   }
@@ -29,6 +32,17 @@ async function handler(req, res) {
     return res.status(400).json({ error: 'Bad tag' });
   }
   const uniqueEmails = [...new Set(emails.map(String))];
+  // A group-scoped caller labels only their own groups' people.
+  if (isScoped(actor)) {
+    try {
+      const [groupsById, memberships] = await Promise.all([loadGroups(), loadGroupMemberships()]);
+      if (uniqueEmails.some((e) => !personInScope(actor, memberships[e.trim().toLowerCase()], groupsById))) {
+        return res.status(404).json({ error: 'Not a viewer' });
+      }
+    } catch {
+      return res.status(500).json({ error: 'Could not complete the bulk action' });
+    }
+  }
 
   let results;
   try {

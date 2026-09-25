@@ -1,5 +1,6 @@
 import { withMonitorApi } from '../../../lib/monitor';
-import { requireCapability } from '../../../lib/guard';
+import { requireActor } from '../../../lib/guard';
+import { isScoped, placementGroups } from '../../../lib/staffScopeRules';
 import { CAP } from '../../../lib/capabilities';
 import { redis, k } from '../../../lib/redis';
 import { normalizeEmail, isValidEmail } from '../../../lib/auth';
@@ -13,8 +14,9 @@ import { loadGroups, setGroupsForEmail } from '../../../lib/groups';
 // anyone in.
 async function handler(req, res) {
   const cap = req.method === 'GET' ? CAP.VIEWERS_READ : CAP.VIEWERS_MANAGE;
-  const admin = await requireCapability(req, res, cap);
-  if (!admin) return;
+  const actor = await requireActor(req, res, cap);
+  if (!actor) return;
+  const admin = actor.email;
 
   if (req.method === 'GET') {
     try {
@@ -30,10 +32,20 @@ async function handler(req, res) {
   if (req.method === 'POST') {
     const email = normalizeEmail(req.body?.email);
     if (!email || !isValidEmail(email)) return res.status(400).json({ error: 'Bad email' });
-    const groupIds = Array.isArray(req.body?.groupIds) ? req.body.groupIds.map(String) : [];
+    let groupIds = Array.isArray(req.body?.groupIds) ? req.body.groupIds.map(String) : [];
     try {
+      if (isScoped(actor)) {
+        // A group-scoped caller approves into their own groups only, and the
+        // membership is written BEFORE the approval, so a failure between the
+        // two can never leave an approved viewer in no group.
+        const groupsById = await loadGroups();
+        const placeIn = placementGroups(actor, groupIds, groupsById);
+        if (!placeIn) return res.status(400).json({ error: 'Choose which of your groups to add them to' });
+        await setGroupsForEmail(email, placeIn, groupsById);
+        groupIds = placeIn;
+      }
       await redis().sadd(k('viewers'), email);
-      if (groupIds.length) {
+      if (groupIds.length && !isScoped(actor)) {
         const groupsById = await loadGroups();
         await setGroupsForEmail(email, groupIds, groupsById);
       }

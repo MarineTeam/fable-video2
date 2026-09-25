@@ -1,5 +1,6 @@
 import { withMonitorApi } from '../../../lib/monitor';
-import { requireCapability } from '../../../lib/guard';
+import { requireActor } from '../../../lib/guard';
+import { guidInScope } from '../../../lib/staffScope';
 import { CAP } from '../../../lib/capabilities';
 import { isExplicitlyTrue, oneTrimmed } from '../../../lib/params';
 import { allowRequest } from '../../../lib/ratelimit';
@@ -37,8 +38,9 @@ const LANG = /^[A-Za-z0-9-]{2,12}$/;
 const GUID = /^[0-9a-f-]{10,64}$/i;
 
 async function handler(req, res) {
-  const admin = await requireCapability(req, res, CAP.VIDEOS_MANAGE);
-  if (!admin) return;
+  const actor = await requireActor(req, res, CAP.VIDEOS_MANAGE);
+  if (!actor) return;
+  const admin = actor.email;
 
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
@@ -47,6 +49,8 @@ async function handler(req, res) {
 
   const guid = oneTrimmed(req.body?.guid);
   if (!guid || !GUID.test(guid)) return res.status(400).json({ error: 'Bad video id' });
+  // A group-scoped caller transcribes only videos their groups grant.
+  if (!(await guidInScope(actor, guid))) return res.status(404).json({ error: 'Video not found' });
 
   // Ingest only reads a file bunny already produced, so it is handled before
   // the rate limit that guards the paid half.

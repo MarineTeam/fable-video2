@@ -3,6 +3,18 @@
 All notable changes to the Marine Video Portal. Dates are UTC, matching the
 commit history (`git log --oneline`).
 
+## 2026-09-25 — Staff limited to certain groups
+
+- **Group limits for staff.** With group content gating on, a person's roles can be limited to certain
+  groups (Roles tab → "Limit to certain groups"). Their capabilities then reach only those groups, their
+  members, and the videos those groups grant; in the library they see what their groups see. They upload
+  into their groups, delete only videos no other group can see, add new viewers straight into one of
+  their groups, and change who is in their groups. Settings, roles, the activity log and broadcasts are
+  never available with a limit, and neither are the library-wide controls (collections, the homepage
+  order, public links, a group itself). Owners can't be limited, and a limit whose groups are all deleted
+  means no groups — never the whole portal. Routes that need to know who is asking now use
+  `requireActor`, which returns the resolved actor rather than the email.
+
 ## 2026-09-24 — Bounded watch progress; delete forgets everything about a video
 
 - **Watch progress had no bounds.** `POST /api/progress` took any string up to
