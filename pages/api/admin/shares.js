@@ -1,5 +1,6 @@
 import { withMonitorApi } from "../../../lib/monitor";
-import { requireCapability } from '../../../lib/guard';
+import { requireActor } from '../../../lib/guard';
+import { guidsInScope, shareIdsOutsideScope } from '../../../lib/staffScope';
 import { CAP } from '../../../lib/capabilities';
 import { redis, k } from '../../../lib/redis';
 import { getVideo } from '../../../lib/bunny';
@@ -8,8 +9,17 @@ import { shareStatus, revokeShare, unrevokeShare, purgeShare, loadShares } from 
 import { oneTrimmed } from '../../../lib/params';
 
 async function handler(req, res) {
-  const admin = await requireCapability(req, res, req.method === 'GET' ? CAP.SHARES_READ : CAP.SHARES_MANAGE);
-  if (!admin) return;
+  const actor = await requireActor(req, res, req.method === 'GET' ? CAP.SHARES_READ : CAP.SHARES_MANAGE);
+  if (!actor) return;
+  const admin = actor.email;
+  // A group-scoped caller sees and changes only links to videos their groups
+  // grant. The single-link actions below all name one id.
+  if (req.method !== 'GET') {
+    const id = oneTrimmed(req.query.id) || oneTrimmed(req.body?.id);
+    if (id && (await shareIdsOutsideScope(actor, [id])).length) {
+      return res.status(404).json({ error: 'Link not found' });
+    }
+  }
   const r = redis();
 
   if (req.method === 'GET') {
@@ -47,7 +57,8 @@ async function handler(req, res) {
         s.videoTitle = titles[s.videoId];
       });
       shares.sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
-      return res.json({ shares });
+      const allowed = await guidsInScope(actor, uniqueVideoIds);
+      return res.json({ shares: shares.filter((s) => allowed.has(s.videoId)) });
     } catch {
       return res.status(500).json({ error: 'Could not load shares' });
     }

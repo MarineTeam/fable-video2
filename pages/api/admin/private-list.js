@@ -1,5 +1,6 @@
 import { withMonitorApi } from "../../../lib/monitor";
-import { requireCapability } from '../../../lib/guard';
+import { requireActor } from '../../../lib/guard';
+import { guidInScope } from '../../../lib/staffScope';
 import { CAP } from '../../../lib/capabilities';
 import { allowRequest } from '../../../lib/ratelimit';
 import { normalizeEmail, isValidEmail } from '../../../lib/auth';
@@ -23,8 +24,15 @@ const MAX_EMAILS = 50;
 // created for them — a share for the same (videoId, email) created through
 // the regular Share/Bulk Share button is untouched either way.
 async function handler(req, res) {
-  const admin = await requireCapability(req, res, CAP.SHARES_MANAGE);
-  if (!admin) return;
+  const actor = await requireActor(req, res, CAP.SHARES_MANAGE);
+  if (!actor) return;
+  const admin = actor.email;
+  // A group-scoped caller sees and edits the private lists of videos their
+  // groups grant, and no others.
+  const videoParam = String(req.query.videoId || req.body?.videoId || '');
+  if (videoParam && !(await guidInScope(actor, videoParam))) {
+    return res.status(404).json({ error: 'Video not found' });
+  }
 
   if (req.method === 'GET') {
     const videoId = String(req.query.videoId || '');

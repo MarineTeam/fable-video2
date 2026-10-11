@@ -1,5 +1,7 @@
 import { withMonitorApi } from "../../../lib/monitor";
-import { requireCapability, resolveActor } from '../../../lib/guard';
+import { requireActor } from '../../../lib/guard';
+import { SCOPED_REFUSAL } from '../../../lib/staffScope';
+import { effectiveScopeGroups, isScoped } from '../../../lib/staffScopeRules';
 import { CAP, hasCapability } from '../../../lib/capabilities';
 import { grantVideoToGroups, loadGroups, MAX_SCOPE_ENTRIES } from '../../../lib/groups';
 import { planUploadGrants } from '../../../lib/uploadGrants';
@@ -12,26 +14,50 @@ import { logAction } from '../../../lib/audit';
 // ever touch this server, and the API key stays here.
 async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  const admin = await requireCapability(req, res, CAP.VIDEOS_UPLOAD);
-  if (!admin) return;
+  const actor = await requireActor(req, res, CAP.VIDEOS_UPLOAD);
+  if (!actor) return;
+  const admin = actor.email;
+  const scoped = isScoped(actor);
   if (!(await allowRequest('upload', admin, 20, 3600))) {
     return res.status(429).json({ error: 'Too many uploads, slow down' });
   }
 
   const title = String(req.body?.title || '').trim().slice(0, 200) || 'Untitled';
   const collectionId = typeof req.body?.collectionId === 'string' ? req.body.collectionId : '';
+  // A collection can be granted to groups outside a scoped caller's scope, so
+  // choosing one would decide who else sees the video.
+  if (scoped && collectionId) return res.status(403).json({ error: SCOPED_REFUSAL });
 
   // Groups this upload should be visible to. Everything that can refuse the
   // request is decided HERE, before the bunny.net video exists — a refusal
   // after createVideo would leave an orphan in the library.
   let groupIds = [];
   const requestedGroups = req.body?.groupIds;
-  if (requestedGroups !== undefined && requestedGroups !== null) {
+  if (scoped) {
+    // A group-scoped uploader's video goes to their own groups — the ones
+    // they chose, or all of them — and never anyone else's. Granting their own
+    // groups needs no groups.manage: it is the only way the video lands inside
+    // their scope at all.
+    let groupsById;
+    try {
+      groupsById = await loadGroups();
+    } catch {
+      return res.status(502).json({ error: 'Could not read groups — try again' });
+    }
+    const mine = effectiveScopeGroups(actor.staffScope, groupsById);
+    const wanted = requestedGroups === undefined || requestedGroups === null ? mine : requestedGroups;
+    if (Array.isArray(wanted) && wanted.some((id) => typeof id !== 'string' || !mine.includes(id))) {
+      return res.status(403).json({ error: 'You can only grant an upload to your own groups' });
+    }
+    const plan = planUploadGrants(wanted, groupsById, { maxVideosPerGroup: MAX_SCOPE_ENTRIES });
+    if (!plan.ok) return res.status(plan.status).json({ error: plan.error });
+    if (!plan.groupIds.length) {
+      return res.status(400).json({ error: 'Choose at least one of your groups for this video' });
+    }
+    groupIds = plan.groupIds;
+  } else if (requestedGroups !== undefined && requestedGroups !== null) {
     // Granting a group is a groups.manage act, whatever form it arrives
     // through: videos.upload and groups.manage are separate capabilities.
-    // requireCapability returns only the EMAIL in this repo, so the actor is
-    // resolved here — and an owner holds everything, as in requireCapability.
-    const actor = await resolveActor(admin);
     if (!actor.owner && !hasCapability(actor.capabilities, CAP.GROUPS_MANAGE)) {
       return res.status(403).json({ error: 'Forbidden' });
     }

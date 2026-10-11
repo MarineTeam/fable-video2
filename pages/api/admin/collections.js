@@ -1,5 +1,7 @@
 import { withMonitorApi } from "../../../lib/monitor";
-import { requireCapability } from '../../../lib/guard';
+import { requireActor } from '../../../lib/guard';
+import { SCOPED_REFUSAL } from '../../../lib/staffScope';
+import { isScoped } from '../../../lib/staffScopeRules';
 import { CAP } from '../../../lib/capabilities';
 import { listCollections, createCollection, deleteCollection } from '../../../lib/bunny';
 import { logAction } from '../../../lib/audit';
@@ -7,8 +9,12 @@ import { oneTrimmed } from '../../../lib/params';
 import { pruneCollectionFromGroups } from '../../../lib/groups';
 
 async function handler(req, res) {
-  const admin = await requireCapability(req, res, req.method === 'GET' ? CAP.VIDEOS_READ : CAP.VIDEOS_MANAGE);
-  if (!admin) return;
+  const actor = await requireActor(req, res, req.method === 'GET' ? CAP.VIDEOS_READ : CAP.VIDEOS_MANAGE);
+  if (!actor) return;
+  const admin = actor.email;
+  // Creating or deleting a collection reshapes the library, and a collection
+  // can be granted to any group — not a group-scoped act.
+  if (req.method !== 'GET' && isScoped(actor)) return res.status(403).json({ error: SCOPED_REFUSAL });
 
   if (req.method === 'GET') {
     try {

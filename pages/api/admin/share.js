@@ -1,5 +1,6 @@
 import { withMonitorApi } from "../../../lib/monitor";
-import { requireCapability } from '../../../lib/guard';
+import { requireActor } from '../../../lib/guard';
+import { guidInScope } from '../../../lib/staffScope';
 import { CAP } from '../../../lib/capabilities';
 import { allowRequest } from '../../../lib/ratelimit';
 import { normalizeEmail, isValidEmail } from '../../../lib/auth';
@@ -13,8 +14,9 @@ const MAX_EMAILS = 50;
 
 async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  const admin = await requireCapability(req, res, CAP.SHARES_MANAGE);
-  if (!admin) return;
+  const actor = await requireActor(req, res, CAP.SHARES_MANAGE);
+  if (!actor) return;
+  const admin = actor.email;
   if (!(await allowRequest('share', admin, 10, 60))) {
     return res.status(429).json({ error: 'Too many requests' });
   }
@@ -46,6 +48,8 @@ async function handler(req, res) {
   if (typeof videoId !== 'string' || !videoId || videoId.length > 64) {
     return res.status(400).json({ error: 'Bad videoId' });
   }
+  // A group-scoped caller shares only videos their groups grant.
+  if (!(await guidInScope(actor, videoId))) return res.status(404).json({ error: 'Video not found' });
   if (!Array.isArray(emails) || emails.length === 0 || emails.length > MAX_EMAILS) {
     return res.status(400).json({ error: `Provide 1-${MAX_EMAILS} recipient emails` });
   }
