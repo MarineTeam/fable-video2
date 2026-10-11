@@ -94,7 +94,7 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
   and add one (up to 1,000 characters); a comment appears at once. **Other viewers see the author's account name, never
   their email** — the profile name, or the part of the email before the @ when the profile has none or the name is itself
   an email address. An author can delete their own comment at any time; an owner, or anyone holding **Remove any viewer's
-  comment** (Roles tab), can remove anyone's from the same place, and that removal is in the Activity log. Staff who can
+  comment** (Roles tab — every role that could manage viewers was given it once on 2026-10-11), can remove anyone's from the same place, and that removal is in the Activity log. Staff who can
   read the viewer list also see each author's email, so an abusive comment can be traced to an account. Comments obey group
   scope and the publish window exactly as watching does, are rate limited per person (30 an hour), capped at 500 per video,
   removed with the video, and shown as plain text — nothing typed becomes markup or a link.

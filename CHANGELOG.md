@@ -3,6 +3,12 @@
 All notable changes to the Marine Video Portal. Dates are UTC, matching the
 commit history (`git log --oneline`).
 
+## 2026-10-11 — Viewer managers can remove comments
+
+- **Every role that can manage viewers can now remove any viewer's comment.** It is granted once, the first time
+  someone with staff access opens the admin page or the Roles tab after this deploy, and the Activity log says which
+  roles got it. Taking it off a role afterwards sticks.
+
 ## 2026-10-11 — Removing a viewer deletes their data
 
 - **Removing a viewer deletes what was recorded about them**: their watch history, saved list, votes and comments on

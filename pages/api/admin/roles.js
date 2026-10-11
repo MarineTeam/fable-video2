@@ -2,6 +2,7 @@ import { withMonitorApi } from '../../../lib/monitor';
 import { requireCapability, resolveActor, viewerAccessFor } from '../../../lib/guard';
 import { allowRequest } from '../../../lib/ratelimit';
 import { logAction } from '../../../lib/audit';
+import { grantCommentModeration } from '../../../lib/commentsGrant';
 import { normalizeEmail, isValidEmail, isAdmin } from '../../../lib/auth';
 import { groupGatingEnabled, loadGroups, sortedGroups } from '../../../lib/groups';
 import { loadStaffScopes, setScopeForEmail } from '../../../lib/staffScopeStore';
@@ -43,6 +44,16 @@ async function handler(req, res) {
   const actor = await resolveActor(admin);
 
   if (req.method === 'GET') {
+    // The one-time comment-moderation grant (lib/commentsGrant.js) — also
+    // run from /admin; best-effort, so the tab loads regardless.
+    try {
+      const granted = await grantCommentModeration();
+      if (granted.length) {
+        await logAction('system', 'role.update', `comments.manage granted to ${granted.join(', ')} (viewer managers)`);
+      }
+    } catch (err) {
+      console.error('Could not grant comment moderation:', err);
+    }
     try {
       const [rolesById, assignments, scopes, groupsById] = await Promise.all([
         loadRoles(),
