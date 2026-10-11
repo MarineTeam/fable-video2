@@ -3,7 +3,8 @@ import { requireActor } from '../../../lib/guard';
 import { isScoped, mayRemovePerson, personInScope, placementGroups } from '../../../lib/staffScopeRules';
 import { CAP } from '../../../lib/capabilities';
 import { redis, k } from '../../../lib/redis';
-import { normalizeEmail, isValidEmail } from '../../../lib/auth';
+import { normalizeEmail, isValidEmail, isAdmin } from '../../../lib/auth';
+import { forgetViewerData } from '../../../lib/viewerData';
 import { logAction } from '../../../lib/audit';
 import { getAllViewerTags, distinctTags, clearViewerTags } from '../../../lib/viewerTags';
 import { clearRolesForEmail } from '../../../lib/roles';
@@ -123,22 +124,37 @@ async function handler(req, res) {
         });
       }
     }
+    // What was recorded about them goes FIRST (lib/viewerData.js): if it
+    // fails they are still listed, and removing them again retries it. An
+    // owner keeps their access whatever this list says, so their data stays.
+    let forgotten = null;
+    if (!isAdmin(email)) {
+      try {
+        forgotten = await forgetViewerData(email);
+      } catch {
+        return res.status(500).json({
+          error: 'Could not delete their saved data, so they were not removed — try again',
+        });
+      }
+    }
     try {
       await r.srem(k('viewers'), email);
       await r.hdel(k('viewer:lastseen'), email).catch(() => {});
       await clearViewerTags(email);
       // Removing a viewer removes their grants, so no orphaned role
       // assignment or group membership can outlive the account and come back
-      // to life if the same address is re-added later. NOT their progress,
-      // saved list or votes — those stay under their email (FEATURES.md,
-      // known gaps).
+      // to life if the same address is re-added later.
       await clearRolesForEmail(email);
       await clearGroupsForEmail(email);
       // A feed token is a bearer credential that survives outside the session,
       // so it must die with the account rather than outlive it.
       await revokeFeedToken(email);
-      await logAction(admin, 'viewer.remove', email);
-      return res.json({ ok: true });
+      await logAction(
+        admin,
+        'viewer.remove',
+        forgotten ? `${email} (data deleted: ${forgotten.votes} votes, ${forgotten.comments} comments)` : email
+      );
+      return res.json({ ok: true, forgotten });
     } catch {
       return res.status(500).json({ error: 'Could not remove viewer' });
     }
