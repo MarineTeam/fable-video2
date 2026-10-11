@@ -3,6 +3,14 @@
 All notable changes to the Marine Video Portal. Dates are UTC, matching the
 commit history (`git log --oneline`).
 
+## 2026-10-11 — Next.js 16.4.0 for three security advisories
+
+- **Locked dependencies moved past three new advisories.** Next.js 16.3.5 → 16.4.0 (a critical
+  server-side request forgery in image optimization, GHSA-cjq9-62q9-8jv4), sharp → 0.35.5 (its bundled
+  librsvg, GHSA-wq5f-xc86-pv6w) and source-map-js → 1.2.2 (an event-loop denial of service,
+  GHSA-68fv-2mgg-jv7q). `package-lock.json` only; `npm audit --omit=dev` now reports nothing. The
+  remaining `braces` advisory is in development tooling and needs a breaking upgrade, so it is left.
+
 ## 2026-09-25 — Staff limited to certain groups
 
 - **Group limits for staff.** With group content gating on, a person's roles can be limited to certain
