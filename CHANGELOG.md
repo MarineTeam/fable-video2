@@ -3,6 +3,14 @@
 All notable changes to the Marine Video Portal. Dates are UTC, matching the
 commit history (`git log --oneline`).
 
+## 2026-10-11 — Removing a viewer deletes their data
+
+- **Removing a viewer deletes what was recorded about them**: their watch history, saved list, votes and comments on
+  every video. Their votes are taken back out of the totals in the same Redis script that deletes them. The data goes
+  before their access, so if anything fails they stay on the list and the removal can be tried again; the confirmation
+  says so before you click. An `ADMIN_EMAILS` owner's data is kept, since the list doesn't decide their access. The
+  activity log records how many votes and comments went.
+
 ## 2026-10-11 — Next.js 16.4.0 for three security advisories
 
 - **Locked dependencies moved past three new advisories.** Next.js 16.3.5 → 16.4.0 (a critical

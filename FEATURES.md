@@ -294,9 +294,8 @@ Current as of **v2.4.0** (rebuilt on Next.js 16 / React 19 / Auth0 v4). Grouped 
   66-book Protestant canon is read for passages.
 - **A cut search says so** — two caps shorten a search: 25 note/transcript matches pulled in by id, then the admin's homepage count (and a passage search that could not read every title is reported the same way). Both are now reported rather than quietly returning a shorter list, because a viewer whose sermon was match 26 otherwise saw a search that confidently did not contain it. The count is only claimed when it is **exact**: matches dropped at the union cap were never fetched, so whether they would have survived the group and schedule filters is genuinely unknown, and the notice says "and there are more" rather than inventing a number.
 - **Comments are flat, final and quiet** — no replies or threads, no editing (delete and post again), no notification of a new one, and no "report" button or admin list of recent comments: moderation happens on the watch page itself. Not on public links or share links, whose viewers are not approved accounts.
-- **Removing a viewer leaves what was recorded about them** — removal clears their tags, roles, groups and feed token, but
-  their progress, saved list, votes and comments stay until something deletes them, and nothing does yet (a moderator can
-  remove the comments by hand). Their
-  votes therefore still count in the totals. The data is keyed by viewer precisely so that deleting it is one key per
-  feature; deciding to do it on removal (and losing a re-added viewer's progress) is an owner call that has not been made.
+- **Data left by viewers removed before 2026-10-11** — removing a viewer now deletes their progress, saved list, votes and
+  comments, but people removed before that change were removed without it, and nothing sweeps up after them. Their comments
+  can be deleted by hand; their old votes are still in the totals until a *Recount ratings* (which counts only stored votes,
+  so it keeps them too).
 - **AI chapters are suggestions, and staying that way is the design** — bunny can generate chapters from the transcript, but nothing on that path writes to the stored list: suggestions are read back read-only (`lib/aiChapters.js`) and land in the admin's textarea, where a person accepts them. A background write would be a second writer for the same field, which is how hand-written chapters get silently replaced. **The field names bunny returns (`title`/`start`) come from its docs, not from a live job** — this has never run against a real transcription, so the reader accepts a few spellings and reports what it could not read rather than returning an empty list.
