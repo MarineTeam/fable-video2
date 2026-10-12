@@ -15,6 +15,8 @@ import {
 import { auth0 } from '../lib/auth0';
 import { trustedEmail } from '../lib/auth';
 import { resolveActor } from '../lib/guard';
+import { grantCommentModeration } from '../lib/commentsGrant';
+import { logAction } from '../lib/audit';
 import { loadGroups } from '../lib/groups';
 import { effectiveScopeGroups, isScoped } from '../lib/staffScopeRules';
 import { CAP } from '../lib/capabilities';
@@ -46,9 +48,21 @@ async function gssp({ req, res }) {
   // least one capability. Which tabs they see is filtered from the same set
   // below — that filtering is a convenience, never the gate: every route
   // re-checks the capability server-side on each call.
-  const actor = await resolveActor(email);
+  let actor = await resolveActor(email);
   if (!actor.staff) {
     return { redirect: { destination: '/', permanent: false } };
+  }
+  // The one-time comment-moderation grant (lib/commentsGrant.js) runs on the
+  // first staff visit after deploy. Best-effort: the page loads regardless,
+  // and a failure is retried on the next visit.
+  try {
+    const granted = await grantCommentModeration();
+    if (granted.length) {
+      await logAction('system', 'role.update', `comments.manage granted to ${granted.join(', ')} (viewer managers)`);
+      actor = await resolveActor(email);
+    }
+  } catch (err) {
+    console.error('Could not grant comment moderation:', err);
   }
   if (!(await isGeoAllowed(req, { admin: true, email }))) {
     return { redirect: { destination: '/', permanent: false } };

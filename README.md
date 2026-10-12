@@ -313,8 +313,9 @@ grant or restrict access — for that, see the **Groups** tab, which is a separa
   `ADMIN_EMAILS` are **owners** who always hold every capability and can never be demoted from here, and
   nobody can grant, edit or revoke a capability they do not hold themselves. Requires `roles.manage`.
   **Comments** are moderated through the same catalog: a comment's author can always delete it, and
-  anyone holding **"Remove any viewer's comment"** (`comments.manage`) can delete anyone's. No role holds
-  it until you grant it; owners always do.
+  anyone holding **"Remove any viewer's comment"** (`comments.manage`) can delete anyone's. Owners always
+  hold it, and every role that could manage viewers on 2026-10-11 was given it once (`lib/commentsGrant.js`), on the
+  first staff visit to the admin page after that deploy; take it off a role and it stays off.
   **Limit to certain groups** (needs `GROUP_CONTENT_GATING=1`): a person's roles can be limited to some
   groups. Their capabilities then reach only those groups, their members, and the videos those groups
   grant — in `/admin` and in the library, where they see what their groups see. They upload into their
