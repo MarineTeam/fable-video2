@@ -3,6 +3,15 @@
 All notable changes to the Marine Video Portal. Dates are UTC, matching the
 commit history (`git log --oneline`).
 
+## 2026-11-11 — Next.js 16.4.6 and Sentry 10.78.0 for new critical advisories
+
+- **Locked dependencies moved past two new critical advisories.** Next.js 16.4.0 → 16.4.6 (unauthenticated remote
+  code execution in image optimization with SVGs, GHSA-2464-fhr4-w9xw, and in `use cache` functions, GHSA-673q-mjm6-r5xr;
+  plus a Server Actions denial of service, GHSA-p3m5-59mp-jv5r) and @sentry/nextjs 10.75.0 → 10.78.0 (middleware bypass
+  through the tunnel route, GHSA-mchm-gjx6-7h55). `package-lock.json` only. Two moderate advisories remain in `glob` and
+  `minimatch`, which reach production dependencies only through Sentry's build-time source-map plugin; fixing them needs
+  a forced change to Sentry's own ranges.
+
 ## 2026-10-11 — Viewer managers can remove comments
 
 - **Every role that can manage viewers can now remove any viewer's comment.** It is granted once, the first time
