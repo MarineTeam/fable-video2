@@ -3,6 +3,19 @@
 All notable changes to the Marine Video Portal. Dates are UTC, matching the
 commit history (`git log --oneline`).
 
+## 2026-11-27 — Next.js 16.4.6 and Sentry 10.78.0 for security advisories
+
+- **Locked dependencies moved past the open Dependabot advisories.** Next.js 16.4.0 → 16.4.6 (ten advisories, two
+  of them critical remote code execution: GHSA-2464-fhr4-w9xw in image optimization and GHSA-673q-mjm6-r5xr in
+  `use cache`), `@sentry/nextjs` 10.75.0 → 10.78.0 (a critical middleware bypass via the tunnel route,
+  GHSA-mchm-gjx6-7h55), zod → 4.6.7 (GHSA-mrhx-c7xc-m3w5), fast-uri → 3.1.9 (four advisories), and in development
+  tooling vitest → 4.1.12 (GHSA-qxg6-89mg-rqv8, GHSA-xp26-3454-mjgp), vite → 8.4.0 and typescript-eslint → 8.74.0.
+  `package-lock.json` only, all within the existing `package.json` ranges.
+- **What's left.** `glob`/`minimatch` (moderate, GHSA-3g3m-2fjr-6pw4 and GHSA-g3hv-75wg-m249) are still reported,
+  only through the build-time Sentry webpack plugin. 10.x pins `glob@^13`, so the fix needs `@sentry/nextjs` 11,
+  which is a major upgrade for a separate change. The vite and launch-editor alerts only covered vite 8.3.0–8.3.2,
+  which the 2026-11-26 vite bump had already moved past.
+
 ## 2026-10-11 — Viewer managers can remove comments
 
 - **Every role that can manage viewers can now remove any viewer's comment.** It is granted once, the first time
