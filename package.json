@@ -11,10 +11,10 @@
   },
   "dependencies": {
     "@auth0/nextjs-auth0": "^4.25.0",
-    "@sentry/nextjs": "^10.66.0",
+    "@sentry/nextjs": "^10.78.0",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.38.0",
-    "next": "^16.3.0",
+    "next": "^16.4.6",
     "player.js": "^0.1.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
@@ -24,7 +24,7 @@
   "devDependencies": {
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.2.10",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.12"
   },
   "engines": {
     "node": ">=20.9"
